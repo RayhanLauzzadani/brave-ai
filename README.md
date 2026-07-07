@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BRAVE AI CCTV
 
-## Getting Started
+Repository ini berisi dua aplikasi utama:
 
-First, run the development server:
+- `frontend/` - Next.js PWA untuk monitoring CCTV, rekaman, dan log bullying.
+- `backend/` - FastAPI API untuk auth, kamera, rekaman, log bullying, alert, dan WebSocket.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Catatan scope: repo ini tidak mengembangkan model AI. Backend hanya menerima event deteksi dari service eksternal atau data dummy, lalu menyimpan dan menyajikannya ke frontend.
+
+## Struktur
+
+```text
+brave-ai-cctv/
+  frontend/                 # Next.js app
+  backend/                  # FastAPI app
+  docker-compose.backend.yml
+  AGENTS.md
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Menjalankan Frontend
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Frontend berjalan di:
 
-## Learn More
+```text
+http://localhost:3000
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Menjalankan Backend
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+copy .env.example .env
+alembic upgrade head
+python -m app.db.seed
+uvicorn app.main:app --reload --port 8000
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Backend docs tersedia di:
 
-## Deploy on Vercel
+```text
+http://localhost:8000/docs
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Atau pakai Docker Compose dari root repo:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+docker compose -f docker-compose.backend.yml up --build
+```
+
+Setelah service backend/postgres menyala, jalankan migration dan seed user demo:
+
+```bash
+docker compose -f docker-compose.backend.yml exec api alembic upgrade head
+docker compose -f docker-compose.backend.yml exec api python -m app.db.seed
+```
+
+Demo login:
+
+```text
+admin@braveai.school / password
+```
+
+## Environment Frontend
+
+Contoh file ada di `frontend/.env.example`:
+
+```env
+NEXT_PUBLIC_APP_NAME=BRAVE AI
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+NEXT_PUBLIC_MEDIA_BASE_URL=http://localhost:8000/media
+```

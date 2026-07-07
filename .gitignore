@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!*/.env.example
 
 # vercel
 .vercel
@@ -39,3 +41,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# python backend
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.env
+*.pyc
+# frontend generated files
+/frontend/node_modules
+/frontend/.next
+/frontend/out
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+backend/*.egg-info/

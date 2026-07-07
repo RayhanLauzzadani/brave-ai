@@ -1,0 +1,41 @@
+services:
+  api:
+    build:
+      context: ./backend
+    container_name: brave-ai-api
+    env_file:
+      - ./backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: brave-ai-postgres
+    environment:
+      POSTGRES_DB: brave_ai
+      POSTGRES_USER: brave
+      POSTGRES_PASSWORD: brave_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - brave_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: brave-ai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - brave_redis_data:/data
+
+volumes:
+  brave_postgres_data:
+  brave_redis_data:
