@@ -36,6 +36,8 @@ webrtcAddress: :8889
 webrtcAllowOrigins: ["*"]
 webrtcLocalUDPAddress: :8189
 webrtcIPsFromInterfaces: true
+# Public candidates for browser publishers/readers outside Docker/LAN.
+webrtcAdditionalHosts: [brave-ai.web.id, 148.230.103.197]
 
 pathDefaults:
   # Pull/publish sources are recorded by the gateway, not by the browser.

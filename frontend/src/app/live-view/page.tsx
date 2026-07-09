@@ -89,6 +89,7 @@ export default function LiveViewPage() {
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceStatusState, setSourceStatusState] = useState<LiveCameraPlayerStatus["state"]>("idle");
   const [isSavingSource, setIsSavingSource] = useState(false);
+  const [isOpeningPublisher, setIsOpeningPublisher] = useState(false);
   const [isTestingSource, setIsTestingSource] = useState(false);
   const [videoDevices, setVideoDevices] = useState<LocalVideoDevice[]>([]);
   const [localDeviceByCameraId, setLocalDeviceByCameraId] = useState<Record<string, string>>({});
@@ -801,7 +802,49 @@ export default function LiveViewPage() {
       setIsSavingSource(false);
     }
   };
+  const handleOpenDevicePublisher = async () => {
+    if (!selectedCamera) return;
 
+    const mediaPath = getDevicePublisherMediaPath(selectedCamera, streamUrlInput);
+    const publisherWindow = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    if (publisherWindow) {
+      publisherWindow.opener = null;
+      publisherWindow.document.body.innerHTML = '<p style="font-family: system-ui, sans-serif; padding: 24px; color: #0f172a;">Menyiapkan publisher kamera BRAVE AI...</p>';
+    }
+
+    setIsOpeningPublisher(true);
+    setSourceStatusState("starting");
+    setSourceMessage("Menyiapkan perangkat ini sebagai kamera live lintas device...");
+
+    try {
+      const updated = await updateCameraSource(selectedCamera.id, {
+        sourceType: "hls",
+        streamUrl: null,
+        mediaPath,
+      });
+      setCameras((current) => current.map((camera) => camera.id === updated.id ? updated : camera));
+      setSourceType("hls");
+      setStreamUrlInput(getCameraSourceInputValue(updated));
+      setLocalWebcamCameraId(null);
+      setPausedLocalWebcamByCameraId((current) => ({ ...current, [updated.id]: false }));
+
+      const publisherUrl = buildGatewayWebRtcPublisherUrl(mediaPath);
+      if (publisherWindow) {
+        publisherWindow.location.href = publisherUrl;
+      } else if (typeof window !== "undefined") {
+        window.open(publisherUrl, "_blank", "noopener,noreferrer");
+      }
+
+      setSourceStatusState("starting");
+      setSourceMessage(`Publisher kamera dibuka untuk ${mediaPath}. Di tab baru, izinkan kamera lalu klik Publish. Device lain akan melihatnya dari Live Camera setelah stream aktif.`);
+    } catch (error) {
+      publisherWindow?.close();
+      setSourceStatusState("error");
+      setSourceMessage(error instanceof Error ? error.message : "Publisher kamera belum bisa dibuka.");
+    } finally {
+      setIsOpeningPublisher(false);
+    }
+  };
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -1177,7 +1220,11 @@ export default function LiveViewPage() {
                         />
                       </div>
 
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button onClick={() => void handleOpenDevicePublisher()} disabled={!selectedCamera || isOpeningPublisher || isSavingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-100 bg-white px-4 py-2 text-[12px] font-bold text-emerald-600 shadow-sm hover:bg-emerald-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[128px]">
+                          <Signal className={cn("w-3.5 h-3.5", isOpeningPublisher && "animate-pulse")} />
+                          <span>{isOpeningPublisher ? "Membuka" : "Jadikan Kamera"}</span>
+                        </button>
                         <button onClick={() => void handleTestCameraSource()} disabled={!selectedCamera || isTestingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white px-4 py-2 text-[12px] font-bold text-blue-600 shadow-sm hover:bg-blue-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[80px]">
                           <Signal className={cn("w-3.5 h-3.5", isTestingSource && "animate-pulse")} />
                           <span>{isTestingSource ? "Testing" : "Test"}</span>
@@ -2071,7 +2118,7 @@ function resolveCameraSourceTestUrl(sourceType: CameraSourceType, rawInput: stri
 
 function getSourceInputPlaceholder(sourceType: CameraSourceType) {
   if (sourceType === "local-webcam") return "Webcam lokal tidak memerlukan URL";
-  if (sourceType === "hls") return "camera-1 atau http://localhost:8888/camera-1/index.m3u8";
+  if (sourceType === "hls") return "camera-1 atau https://brave-ai.web.id/hls/camera-1/index.m3u8";
   return "URL stream kamera...";
 }
 
@@ -2091,16 +2138,46 @@ function looksLikeUrl(value: string) {
 function extractMediaPathFromHlsUrl(value: string) {
   try {
     const url = new URL(value);
-    return normalizeMediaPath(url.pathname);
+    return stripMediaGatewayPrefix(normalizeMediaPath(url.pathname), "hls");
   } catch {
     return null;
   }
 }
 
+function getDevicePublisherMediaPath(camera: CameraType, rawInput: string) {
+  const input = rawInput.trim();
+  if (input) {
+    const inputPath = looksLikeUrl(input)
+      ? extractMediaPathFromHlsUrl(input)
+      : normalizeMediaPath(input);
+    const cleanedInputPath = stripMediaGatewayPrefix(inputPath, "hls");
+    if (cleanedInputPath) return cleanedInputPath;
+  }
+
+  if (camera.mediaPath) {
+    const savedMediaPath = stripMediaGatewayPrefix(camera.mediaPath, "hls");
+    if (savedMediaPath) return savedMediaPath;
+  }
+
+  const savedUrl = camera.liveHlsUrl ?? camera.streamUrl ?? "";
+  const savedUrlPath = savedUrl && looksLikeUrl(savedUrl)
+    ? extractMediaPathFromHlsUrl(savedUrl)
+    : normalizeMediaPath(savedUrl);
+  const cleanedSavedUrlPath = stripMediaGatewayPrefix(savedUrlPath, "hls");
+  if (cleanedSavedUrlPath) return cleanedSavedUrlPath;
+
+  return `browser-${slugifyMediaPath(camera.id || camera.name)}`;
+}
+
 function buildGatewayHlsUrl(mediaPath: string | null) {
   if (!mediaPath) return "";
   const baseUrl = getGatewayHlsBaseUrl().replace(/\/+$/g, "");
-  return `${baseUrl}/${mediaPath}/index.m3u8`;
+  return `${baseUrl}/${encodeMediaPath(mediaPath)}/index.m3u8`;
+}
+
+function buildGatewayWebRtcPublisherUrl(mediaPath: string) {
+  const baseUrl = getGatewayWebRtcBaseUrl().replace(/\/+$/g, "");
+  return `${baseUrl}/${encodeMediaPath(mediaPath)}/publish`;
 }
 
 function getGatewayHlsBaseUrl() {
@@ -2109,12 +2186,52 @@ function getGatewayHlsBaseUrl() {
   }
 
   if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8888`;
+    const host = window.location.hostname;
+    if (isLoopbackHost(host)) {
+      return `${window.location.protocol}//${host}:8888`;
+    }
+
+    return `${window.location.origin}/hls`;
   }
 
   return "http://localhost:8888";
 }
 
+function getGatewayWebRtcBaseUrl() {
+  if (process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL) {
+    return process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (isLoopbackHost(host)) {
+      return `${window.location.protocol}//${host}:8889`;
+    }
+
+    return `${window.location.origin}/webrtc`;
+  }
+
+  return "http://localhost:8889";
+}
+
+function encodeMediaPath(mediaPath: string) {
+  return mediaPath.split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+
+function stripMediaGatewayPrefix(mediaPath: string | null, prefix: string) {
+  if (!mediaPath) return null;
+  const cleanPath = mediaPath.trim().replace(/^\/+|\/+$/g, "");
+  if (!cleanPath || cleanPath === prefix) return null;
+  return cleanPath.startsWith(`${prefix}/`) ? cleanPath.slice(prefix.length + 1) : cleanPath;
+}
+
+function slugifyMediaPath(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
+}
+
+function isLoopbackHost(host: string) {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
 function getUnsupportedSourceTestMessage(sourceType: CameraSourceType) {
   if (sourceType === "rtsp") return "Format belum support di browser: RTSP perlu media gateway ke HLS/WebRTC.";
   if (sourceType === "nvr") return "Format belum support langsung: NVR/DVR perlu gateway atau API playback.";

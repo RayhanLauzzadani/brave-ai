@@ -11,6 +11,10 @@
 		reverse_proxy mediamtx:8888
 	}
 
+	handle_path /webrtc/* {
+		reverse_proxy mediamtx:8889
+	}
+
 	handle_path /playback/* {
 		reverse_proxy mediamtx:9996
 	}

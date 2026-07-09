@@ -150,6 +150,14 @@ Watch HLS through HTTPS:
 https://brave-ai.web.id/hls/camera-1/index.m3u8
 ```
 
+Browser webcam publish through HTTPS:
+
+```text
+https://brave-ai.web.id/webrtc/camera-1/publish
+```
+
+Use this for laptop/phone webcams that must be visible from other logged-in devices. The app's **Jadikan Kamera** button saves the camera as an HLS/MediaMTX source, then opens the matching `/webrtc/{path}/publish` page.
+
 Direct HLS fallback:
 
 ```text

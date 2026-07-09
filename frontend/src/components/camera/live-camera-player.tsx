@@ -206,11 +206,28 @@ export function LiveCameraPlayer({
         }
 
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        let hlsRetryCount = 0;
+        const retryHlsStream = () => {
+          if (hlsRetryCount >= 8) {
+            queueStatus({ state: "error", message: "Stream HLS belum bisa diputar." });
+            return;
+          }
+
+          hlsRetryCount += 1;
+          queueStatus({ state: "starting", message: "Menunggu stream HLS aktif..." });
+          const retryTimeout = window.setTimeout(() => {
+            if (cancelled) return;
+            hls.loadSource(streamUrl);
+          }, 1500);
+          statusTimeouts.push(retryTimeout);
+        };
+
         hlsInstance = hls;
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) queueStatus({ state: "error", message: "Stream HLS belum bisa diputar." });
+          if (!data.fatal) return;
+          retryHlsStream();
         });
         queueStatus({ state: "active", message: "HLS aktif" });
         return;
