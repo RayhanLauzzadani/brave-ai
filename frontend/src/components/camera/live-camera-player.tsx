@@ -192,10 +192,16 @@ export function LiveCameraPlayer({
       if (!video || !streamUrl) return;
 
       if (isHlsStream(streamUrl, sourceType)) {
+        queueStatus({ state: "starting", message: "Menunggu stream HLS aktif..." });
+
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = streamUrl;
+          video.playsInline = true;
+          video.muted = isMuted;
+          video.onloadedmetadata = () => queueStatus({ state: "active", message: "HLS aktif" });
+          video.oncanplay = () => queueStatus({ state: "active", message: "HLS aktif" });
+          video.onerror = () => queueStatus({ state: "starting", message: "Stream HLS belum aktif. Buka Camera Station, izinkan kamera, lalu klik Publish." });
           if (isPlayingRef.current) await video.play().catch(() => undefined);
-          queueStatus({ state: "active", message: "HLS aktif" });
           return;
         }
 
@@ -208,8 +214,8 @@ export function LiveCameraPlayer({
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
         let hlsRetryCount = 0;
         const retryHlsStream = () => {
-          if (hlsRetryCount >= 8) {
-            queueStatus({ state: "error", message: "Stream HLS belum bisa diputar." });
+          if (hlsRetryCount >= 20) {
+            queueStatus({ state: "error", message: "Stream HLS belum aktif. Buka Camera Station, izinkan kamera, lalu klik Publish." });
             return;
           }
 
@@ -223,16 +229,25 @@ export function LiveCameraPlayer({
         };
 
         hlsInstance = hls;
-        hls.loadSource(streamUrl);
         hls.attachMedia(video);
+        hls.loadSource(streamUrl);
+        hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          queueStatus({ state: "active", message: "HLS aktif" });
+          if (isPlayingRef.current) await video.play().catch(() => undefined);
+        });
+        hls.on(Hls.Events.LEVEL_LOADED, () => {
+          queueStatus({ state: "active", message: "HLS aktif" });
+        });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!data.fatal) return;
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+            return;
+          }
           retryHlsStream();
         });
-        queueStatus({ state: "active", message: "HLS aktif" });
         return;
       }
-
       video.src = streamUrl;
       video.playsInline = true;
       video.muted = isMuted;
@@ -371,7 +386,7 @@ function getUnsupportedMessage(sourceType: Camera["sourceType"]) {
 function shouldShowStateOverlay(mode: PlaybackMode, status: LiveCameraPlayerStatus) {
   if (!status.message) return false;
   if (mode === "offline" || mode === "unsupported") return true;
-  return ["permission-denied", "busy", "missing", "unsupported", "error", "stopped"].includes(status.state);
+  return ["starting", "permission-denied", "busy", "missing", "unsupported", "error", "stopped"].includes(status.state);
 }
 
 function getFriendlyWebcamStatus(error: unknown): LiveCameraPlayerStatus {

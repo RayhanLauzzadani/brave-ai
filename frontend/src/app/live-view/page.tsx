@@ -257,6 +257,13 @@ export default function LiveViewPage() {
   const selectedCameraImage = getCameraImage(selectedCamera, selectedCameraIndex);
   const selectedCameraOnline = isCameraOnline(selectedCamera);
   const selectedCameraUsesSavedLocalWebcam = selectedCamera?.sourceType === "local-webcam";
+  const hlsMediaPathPreview = useMemo(() => {
+    if (sourceType !== "hls") return null;
+    const input = streamUrlInput.trim();
+    if (!input) return null;
+    return looksLikeUrl(input) ? extractMediaPathFromHlsUrl(input) : normalizeMediaPath(input);
+  }, [sourceType, streamUrlInput]);
+  const generatedHlsPreviewUrl = hlsMediaPathPreview ? buildGatewayHlsUrl(hlsMediaPathPreview) : "";
   const localWebcamPaused = selectedCamera ? pausedLocalWebcamByCameraId[selectedCamera.id] === true : false;
   const localWebcamActive = !!selectedCamera && (
     localWebcamCameraId === selectedCamera.id ||
@@ -1290,6 +1297,19 @@ export default function LiveViewPage() {
                           />
                         </div>
 
+                        {sourceType === "hls" && (
+                          <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-[11px] font-medium leading-relaxed text-blue-800">
+                            <p>
+                              Masukkan media path MediaMTX, misalnya <span className="font-black">browser-cam-65c7f</span>. Jangan pilih RTSP untuk media path ini.
+                            </p>
+                            {generatedHlsPreviewUrl && (
+                              <p className="mt-1 break-all text-blue-700">
+                                URL HLS: <span className="font-semibold">{generatedHlsPreviewUrl}</span>
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-end gap-2">
                           <button onClick={() => void handleTestCameraSource()} disabled={!selectedCamera || isTestingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white px-4 py-2 text-[12px] font-bold text-blue-600 shadow-sm hover:bg-blue-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[80px]">
                             <Signal className={cn("w-3.5 h-3.5", isTestingSource && "animate-pulse")} />
@@ -2045,6 +2065,14 @@ async function testRemoteCameraSource({
     return { state: "active", message: "Source valid: preview mock siap digunakan." };
   }
 
+  const input = streamUrl.trim();
+  if (sourceType === "rtsp" && input && !looksLikeUrl(input) && normalizeMediaPath(input)) {
+    return {
+      state: "unsupported",
+      message: `"${input}" adalah media path MediaMTX. Pilih HLS / MediaMTX untuk path ini; RTSP hanya untuk URL rtsp:// dari CCTV/NVR.`,
+    };
+  }
+
   if (sourceType === "rtsp" || sourceType === "nvr" || sourceType === "webrtc") {
     return {
       state: "unsupported",
@@ -2052,11 +2080,11 @@ async function testRemoteCameraSource({
     };
   }
 
-  if (!streamUrl) {
-    return { state: "missing", message: "Masukkan URL stream kamera dulu." };
+  if (!input) {
+    return { state: "missing", message: sourceType === "hls" ? "Masukkan media path atau URL HLS dulu." : "Masukkan URL stream kamera dulu." };
   }
 
-  const urlResult = normalizeHttpUrl(streamUrl);
+  const urlResult = normalizeHttpUrl(input);
   if (!urlResult.ok) return urlResult.result;
 
   const url = urlResult.url;
@@ -2075,7 +2103,6 @@ async function testRemoteCameraSource({
 
   return testImageSource(url.href);
 }
-
 async function testHlsSource(streamUrl: string): Promise<SourceTestResult> {
   const corsResult = await probeCors(streamUrl);
   if (corsResult.ok) {
@@ -2090,17 +2117,30 @@ async function testHlsSource(streamUrl: string): Promise<SourceTestResult> {
     };
   }
 
+  if (corsResult.status === 404) {
+    return {
+      state: "starting",
+      message: "Stream belum aktif. Buka Camera Station atau tab publisher, izinkan kamera, lalu klik Publish.",
+    };
+  }
+
+  if (corsResult.status > 0) {
+    return {
+      state: "starting",
+      message: `Manifest HLS belum siap (HTTP ${corsResult.status}). Pastikan publisher kamera sudah aktif di MediaMTX.`,
+    };
+  }
+
   const noCorsResult = await probeNoCors(streamUrl);
   if (noCorsResult.ok) {
     return {
       state: "error",
-      message: "CORS blocked: URL HLS terjangkau, tapi server tidak mengizinkan browser membaca manifest. HLS perlu CORS atau media gateway.",
+      message: "CORS blocked: URL HLS terjangkau, tapi server belum mengizinkan browser membaca manifest. Cek header CORS di proxy /hls atau MediaMTX.",
     };
   }
 
-  return { state: "error", message: "URL tidak bisa diakses atau server kamera tidak merespons." };
+  return { state: "error", message: "URL HLS tidak bisa diakses atau server kamera tidak merespons." };
 }
-
 async function testVideoSource(streamUrl: string): Promise<SourceTestResult> {
   const mediaResult = await probeVideoElement(streamUrl);
   if (mediaResult.ok) return { state: "active", message: "Source valid: video bisa dimuat browser." };
@@ -2147,18 +2187,18 @@ async function testImageSource(streamUrl: string): Promise<SourceTestResult> {
   return { state: "error", message: imageResult.message || "URL tidak bisa diakses atau kamera HP tidak merespons." };
 }
 
-async function probeCors(streamUrl: string): Promise<{ ok: boolean; contentType: string }> {
+async function probeCors(streamUrl: string): Promise<{ ok: boolean; status: number; contentType: string }> {
   try {
     const response = await fetchWithTimeout(streamUrl, { mode: "cors", cache: "no-store" }, 5000);
     return {
       ok: response.ok,
+      status: response.status,
       contentType: response.headers.get("content-type") ?? "",
     };
   } catch {
-    return { ok: false, contentType: "" };
+    return { ok: false, status: 0, contentType: "" };
   }
 }
-
 async function probeNoCors(streamUrl: string): Promise<{ ok: boolean }> {
   try {
     await fetchWithTimeout(streamUrl, { mode: "no-cors", cache: "no-store" }, 5000);
@@ -2328,7 +2368,7 @@ function resolveCameraSourceTestUrl(sourceType: CameraSourceType, rawInput: stri
 
 function getSourceInputPlaceholder(sourceType: CameraSourceType) {
   if (sourceType === "local-webcam") return "Webcam lokal tidak memerlukan URL";
-  if (sourceType === "hls") return "camera-1 atau https://brave-ai.web.id/hls/camera-1/index.m3u8";
+  if (sourceType === "hls") return "browser-cam-65c7f atau https://brave-ai.web.id/hls/browser-cam-65c7f/index.m3u8";
   return "URL stream kamera...";
 }
 
@@ -2400,7 +2440,7 @@ function getSourceSaveMessage(sourceType: CameraSourceType) {
   if (sourceType === "rtsp") return "Sumber RTSP tersimpan. Playback browser perlu media gateway ke HLS atau WebRTC.";
   if (sourceType === "nvr") return "Sumber NVR/DVR tersimpan. Playback real perlu gateway NVR/media service.";
   if (sourceType === "webrtc") return "Sumber WebRTC tersimpan. Playback real perlu signaling server.";
-  if (sourceType === "hls") return "Sumber HLS/MediaMTX tersimpan.";
+  if (sourceType === "hls") return "Sumber HLS/MediaMTX tersimpan. Jika preview belum muncul, aktifkan publisher dari Camera Station.";
   if (sourceType === "mock") return "Sumber dikembalikan ke preview mock.";
   return "Sumber kamera tersimpan.";
 }
@@ -2408,6 +2448,7 @@ function getSourceSaveMessage(sourceType: CameraSourceType) {
 function getSavedSourceStatusState(sourceType: CameraSourceType): LiveCameraPlayerStatus["state"] {
   if (sourceType === "mock") return "preview";
   if (sourceType === "rtsp" || sourceType === "nvr" || sourceType === "webrtc") return "unsupported";
+  if (sourceType === "hls") return "starting";
   return "active";
 }
 

@@ -24,12 +24,16 @@ services:
       args:
         BACKEND_ORIGIN: http://api:8000
         LAN_HOST: ${APP_HOST:-brave-ai.web.id}
+        NEXT_PUBLIC_MEDIA_HLS_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/hls
+        NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/webrtc
     container_name: brave-ai-frontend
     restart: unless-stopped
     environment:
       NODE_ENV: production
       BACKEND_ORIGIN: http://api:8000
       LAN_HOST: ${APP_HOST:-brave-ai.web.id}
+      NEXT_PUBLIC_MEDIA_HLS_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/hls
+      NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/webrtc
     depends_on:
       - api
 
