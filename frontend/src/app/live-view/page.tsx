@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell, Calendar, Signal, Volume2, Pause, VolumeX, Save, Smartphone, RefreshCw,
   ShieldCheck, CheckCircle2, Camera, Play, MoreVertical, Menu, MapPin, Clock, ShieldAlert, Circle, Maximize, Minimize,
-  ChevronDown, Check, Plus, X, Loader2, Trash2, ChevronLeft, ChevronRight, Square, Download
+  ChevronDown, Check, Plus, X, Loader2, Trash2, ChevronLeft, ChevronRight, Square, Download, MonitorUp, Copy, Info
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -24,6 +24,14 @@ import { useAlertStore } from "@/lib/stores/alert-store";
 import { useCameraStore } from "@/lib/stores/camera-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/utils";
+import {
+  buildGatewayHlsUrl,
+  buildGatewayWebRtcPublisherUrl,
+  buildRaspberryPiInstallCommand,
+  extractMediaPathFromHlsUrl,
+  getDevicePublisherMediaPath,
+  normalizeMediaPath,
+} from "@/lib/media-gateway";
 import type { BullyingLog, Camera as CameraType, CameraSourceType, Recording } from "@/lib/types";
 import {
   FALLBACK_ACTIVITIES,
@@ -90,14 +98,17 @@ export default function LiveViewPage() {
   const [sourceStatusState, setSourceStatusState] = useState<LiveCameraPlayerStatus["state"]>("idle");
   const [isSavingSource, setIsSavingSource] = useState(false);
   const [isOpeningPublisher, setIsOpeningPublisher] = useState(false);
+  const [isCopyingPiCommand, setIsCopyingPiCommand] = useState(false);
   const [isTestingSource, setIsTestingSource] = useState(false);
   const [videoDevices, setVideoDevices] = useState<LocalVideoDevice[]>([]);
   const [localDeviceByCameraId, setLocalDeviceByCameraId] = useState<Record<string, string>>({});
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [isSourceTypeOpen, setIsSourceTypeOpen] = useState(false);
   const [isVideoDeviceOpen, setIsVideoDeviceOpen] = useState(false);
+  const [sourceTab, setSourceTab] = useState<"stream" | "webcam" | "advanced">("stream");
 
   const [isAddCameraModalOpen, setIsAddCameraModalOpen] = useState(false);
+  const [piCommandModal, setPiCommandModal] = useState<{ command: string; mediaPath: string } | null>(null);
   const [newCameraName, setNewCameraName] = useState("");
   const [newCameraLocation, setNewCameraLocation] = useState("");
   const [cameraToDelete, setCameraToDelete] = useState<string | null>(null);
@@ -273,11 +284,7 @@ export default function LiveViewPage() {
   const selectedTriggerLog = selectedCamera
     ? triggerLogByCameraId.get(selectedCamera.id) ?? null
     : null;
-  const aiStatusLabel = selectedTriggerLog
-    ? "AI Trigger"
-    : selectedCamera?.isAiEnabled
-      ? "AI Aktif"
-      : "AI Nonaktif";
+
   const selectedTriggerMarkerPercent = selectedTriggerLog
     ? getLiveEventMarkerPercent(selectedTriggerLog.timestamp, now)
     : null;
@@ -328,7 +335,7 @@ export default function LiveViewPage() {
 
     setSourceStatusState(status.state);
     setSourceMessage(status.message);
-  }, [localWebcamActive, sourceType]);
+  }, [localWebcamActive, setSourceMessage, setSourceStatusState, sourceType]);
 
   const refreshVideoDevices = useCallback(async () => {
     setIsRefreshingDevices(true);
@@ -362,7 +369,7 @@ export default function LiveViewPage() {
     } finally {
       setIsRefreshingDevices(false);
     }
-  }, [handleLocalDevicesChange]);
+  }, [handleLocalDevicesChange, setIsRefreshingDevices, setSourceMessage, setSourceStatusState]);
 
   useEffect(() => {
     if (!selectedCamera) return;
@@ -736,6 +743,10 @@ export default function LiveViewPage() {
     setLocalWebcamCameraId(selectedCamera.id);
     void refreshVideoDevices();
   };
+  const handleOpenCameraStation = () => {
+    if (!selectedCamera) return;
+    router.push(`/camera-station?cameraId=${encodeURIComponent(selectedCamera.id)}`);
+  };
   const handleTestCameraSource = async () => {
     if (!selectedCamera) return;
 
@@ -843,6 +854,37 @@ export default function LiveViewPage() {
       setSourceMessage(error instanceof Error ? error.message : "Publisher kamera belum bisa dibuka.");
     } finally {
       setIsOpeningPublisher(false);
+    }
+  };
+  const handleCopyRaspberryPiCommand = async () => {
+    if (!selectedCamera) return;
+
+    const mediaPath = getDevicePublisherMediaPath(selectedCamera, streamUrlInput);
+    setIsCopyingPiCommand(true);
+    setSourceStatusState("starting");
+    setSourceMessage("Menyiapkan command Raspberry Pi...");
+
+    try {
+      const updated = await updateCameraSource(selectedCamera.id, {
+        sourceType: "hls",
+        streamUrl: null,
+        mediaPath,
+      });
+      setCameras((current) => current.map((camera) => camera.id === updated.id ? updated : camera));
+      setSourceType("hls");
+      setStreamUrlInput(getCameraSourceInputValue(updated));
+      setLocalWebcamCameraId(null);
+      setPausedLocalWebcamByCameraId((current) => ({ ...current, [updated.id]: false }));
+
+      const command = buildRaspberryPiInstallCommand(mediaPath);
+      setPiCommandModal({ command, mediaPath });
+      setSourceStatusState("active");
+      setSourceMessage(`Command Raspberry Pi untuk ${mediaPath} sudah disiapkan.`);
+    } catch (error) {
+      setSourceStatusState("error");
+      setSourceMessage(error instanceof Error ? error.message : "Command Raspberry Pi belum bisa disalin.");
+    } finally {
+      setIsCopyingPiCommand(false);
     }
   };
   useEffect(() => {
@@ -1169,128 +1211,214 @@ export default function LiveViewPage() {
                 {/* Card 2: Pengaturan Sumber Video */}
                 <div className="flex flex-col justify-between rounded-[16px] border border-slate-100 bg-slate-50/50 p-4 lg:p-5">
                   <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <h3 className="text-[13px] lg:text-[14px] font-bold text-[#1e293b] truncate">Sumber Video</h3>
-                      </div>
-                      <button onClick={handleToggleLocalWebcam} disabled={!selectedCamera} className={cn("flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors shadow-sm", localWebcamActive ? "bg-red-50 text-red-600 border-red-100 hover:bg-red-100" : "bg-white text-blue-600 border-blue-100 hover:bg-blue-50")}>
-                        <Smartphone className="w-3.5 h-3.5" />
-                        {localWebcamActive ? "Matikan Webcam" : "Webcam Lokal"}
-                      </button>
+                    <h3 className="text-[13px] lg:text-[14px] font-bold text-[#1e293b] mb-3">Sumber Video</h3>
+
+                    {/* Tab Bar */}
+                    <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-4">
+                      {(["stream", "webcam", "advanced"] as const).map((tab) => (
+                        <button
+                          key={tab}
+                          onClick={() => setSourceTab(tab)}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[11px] pwa:text-[12px] font-bold transition-all",
+                            sourceTab === tab
+                              ? "bg-white text-[#1e293b] shadow-sm"
+                              : "text-slate-500 hover:text-slate-700"
+                          )}
+                        >
+                          {tab === "stream" && <><Signal className="w-3.5 h-3.5" /> <span className="hidden pwa:inline">Stream URL</span><span className="pwa:hidden">Stream</span></>}
+                          {tab === "webcam" && <><Smartphone className="w-3.5 h-3.5" /> Webcam</>}
+                          {tab === "advanced" && <><MonitorUp className="w-3.5 h-3.5" /> <span className="hidden pwa:inline">Lanjutan</span><span className="pwa:hidden">More</span></>}
+                        </button>
+                      ))}
                     </div>
 
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-col sm:flex-row gap-2.5">
-                        <Popover open={isSourceTypeOpen} onOpenChange={setIsSourceTypeOpen}>
-                          <PopoverTrigger className="flex items-center justify-between gap-1.5 pwa:gap-2 px-3 py-2 bg-white border border-slate-200 shadow-sm rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors w-full sm:w-[160px] flex-shrink-0 h-[40px] outline-none focus-visible:ring-4 focus-visible:ring-blue-100 focus-visible:border-blue-400">
-                            <span className="truncate">{getSourceLabel(sourceType) || "Pilih Sumber"}</span>
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[200px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                            {(["mock", "local-webcam", "hls", "direct-video", "phone-webcam", "rtsp", "nvr", "webrtc"] as CameraSourceType[]).map((val) => (
-                              <button
-                                key={val}
-                                onClick={() => {
-                                  setSourceType(val);
-                                  if (val === "local-webcam") {
-                                    setStreamUrlInput("");
-                                    setSourceStatusState("idle");
-                                    setSourceMessage("Pilih Simpan atau Webcam Lokal untuk memakai kamera perangkat ini.");
-                                  }
-                                  setIsSourceTypeOpen(false);
-                                }}
-                                className={cn(
-                                  "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left mt-0.5 first:mt-0",
-                                  sourceType === val ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
-                                )}
-                              >
-                                {getSourceLabel(val)}
-                                {sourceType === val && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
-                              </button>
-                            ))}
-                          </PopoverContent>
-                        </Popover>
-
-                        <input
-                          value={streamUrlInput}
-                          onChange={(event) => setStreamUrlInput(event.target.value)}
-                          disabled={sourceType === "local-webcam"}
-                          placeholder={getSourceInputPlaceholder(sourceType)}
-                          className={cn("w-full flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all h-[40px]", sourceType === "local-webcam" && "bg-slate-100 text-slate-400")}
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button onClick={() => void handleOpenDevicePublisher()} disabled={!selectedCamera || isOpeningPublisher || isSavingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-100 bg-white px-4 py-2 text-[12px] font-bold text-emerald-600 shadow-sm hover:bg-emerald-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[128px]">
-                          <Signal className={cn("w-3.5 h-3.5", isOpeningPublisher && "animate-pulse")} />
-                          <span>{isOpeningPublisher ? "Membuka" : "Jadikan Kamera"}</span>
-                        </button>
-                        <button onClick={() => void handleTestCameraSource()} disabled={!selectedCamera || isTestingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white px-4 py-2 text-[12px] font-bold text-blue-600 shadow-sm hover:bg-blue-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[80px]">
-                          <Signal className={cn("w-3.5 h-3.5", isTestingSource && "animate-pulse")} />
-                          <span>{isTestingSource ? "Testing" : "Test"}</span>
-                        </button>
-                        <button onClick={() => void handleSaveCameraSource()} disabled={!selectedCamera || isSavingSource} className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 transition-colors flex-shrink-0 h-[38px] min-w-[90px]">
-                          <Save className="w-3.5 h-3.5" />
-                          <span>{isSavingSource ? "Menyimpan" : "Simpan"}</span>
-                        </button>
-                      </div>
-
-                      {(sourceType === "local-webcam" || localWebcamActive) && (
-                        <div className="flex flex-col lg:flex-row gap-2.5 pt-1">
-                          <Popover open={isVideoDeviceOpen} onOpenChange={setIsVideoDeviceOpen}>
-                            <PopoverTrigger className="flex items-center justify-between gap-1.5 pwa:gap-2 px-3 py-2 bg-white border border-slate-200 shadow-sm rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors w-full flex-1 min-w-0 h-[38px] outline-none focus-visible:ring-4 focus-visible:ring-blue-100 focus-visible:border-blue-400">
-                              <span className="truncate">
-                                {videoDevices.find(d => d.deviceId === selectedVideoDeviceId)?.label || (selectedVideoDeviceId ? `Kamera ${selectedVideoDeviceId.substring(0, 5)}...` : "Kamera default browser")}
-                              </span>
+                    {/* Tab: Stream URL */}
+                    {sourceTab === "stream" && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-col sm:flex-row gap-2.5">
+                          <Popover open={isSourceTypeOpen} onOpenChange={setIsSourceTypeOpen}>
+                            <PopoverTrigger className="flex items-center justify-between gap-1.5 pwa:gap-2 px-3 py-2 bg-white border border-slate-200 shadow-sm rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors w-full sm:w-[160px] flex-shrink-0 h-[40px] outline-none focus-visible:ring-4 focus-visible:ring-blue-100 focus-visible:border-blue-400">
+                              <span className="truncate">{getSourceLabel(sourceType) || "Pilih Sumber"}</span>
                               <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                             </PopoverTrigger>
-                            <PopoverContent className="w-[300px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                              <button
-                                onClick={() => {
-                                  if (!selectedCamera) return;
-                                  setIsPlaying(true); setSourceStatusState("starting"); setSourceMessage("Mengganti kamera lokal...");
-                                  setLocalDeviceByCameraId((current) => ({ ...current, [selectedCamera.id]: "" }));
-                                  setIsVideoDeviceOpen(false);
-                                }}
-                                className={cn(
-                                  "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left",
-                                  !selectedVideoDeviceId ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
-                                )}
-                              >
-                                Kamera default browser
-                                {!selectedVideoDeviceId && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
-                              </button>
-                              {videoDevices.map((device) => (
+                            <PopoverContent className="w-[200px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                              {(["mock", "local-webcam", "hls", "direct-video", "phone-webcam", "rtsp", "nvr", "webrtc"] as CameraSourceType[]).map((val) => (
                                 <button
-                                  key={device.deviceId}
+                                  key={val}
                                   onClick={() => {
-                                    if (!selectedCamera) return;
-                                    setIsPlaying(true); setSourceStatusState("starting"); setSourceMessage("Mengganti kamera lokal...");
-                                    setLocalDeviceByCameraId((current) => ({ ...current, [selectedCamera.id]: device.deviceId }));
-                                    setIsVideoDeviceOpen(false);
+                                    setSourceType(val);
+                                    if (val === "local-webcam") {
+                                      setStreamUrlInput("");
+                                      setSourceStatusState("idle");
+                                      setSourceMessage("Pilih Simpan atau Webcam Lokal untuk memakai kamera perangkat ini.");
+                                      setSourceTab("webcam");
+                                    }
+                                    setIsSourceTypeOpen(false);
                                   }}
                                   className={cn(
-                                    "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left mt-0.5",
-                                    selectedVideoDeviceId === device.deviceId ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
+                                    "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left mt-0.5 first:mt-0",
+                                    sourceType === val ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
                                   )}
                                 >
-                                  <span className="truncate">{device.label || `Kamera ${device.deviceId.substring(0, 5)}...`}</span>
-                                  {selectedVideoDeviceId === device.deviceId && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
+                                  {getSourceLabel(val)}
+                                  {sourceType === val && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
                                 </button>
                               ))}
                             </PopoverContent>
                           </Popover>
-                          <button
-                            onClick={() => void refreshVideoDevices()}
-                            disabled={isRefreshingDevices}
-                            className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[12px] font-bold text-slate-600 hover:bg-slate-50 disabled:text-slate-400 transition-colors shadow-sm flex-shrink-0"
-                          >
-                            <RefreshCw className={cn("w-3.5 h-3.5", isRefreshingDevices && "animate-spin")} />
-                            <span className="hidden pwa:inline xl:hidden 2xl:inline">Refresh</span>
+
+                          <input
+                            value={streamUrlInput}
+                            onChange={(event) => setStreamUrlInput(event.target.value)}
+                            disabled={sourceType === "local-webcam"}
+                            placeholder={getSourceInputPlaceholder(sourceType)}
+                            className={cn("w-full flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 transition-all h-[40px]", sourceType === "local-webcam" && "bg-slate-100 text-slate-400")}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => void handleTestCameraSource()} disabled={!selectedCamera || isTestingSource} className="flex items-center justify-center gap-1.5 rounded-xl border border-blue-100 bg-white px-4 py-2 text-[12px] font-bold text-blue-600 shadow-sm hover:bg-blue-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors flex-shrink-0 h-[38px] min-w-[80px]">
+                            <Signal className={cn("w-3.5 h-3.5", isTestingSource && "animate-pulse")} />
+                            <span>{isTestingSource ? "Testing" : "Test"}</span>
+                          </button>
+                          <button onClick={() => void handleSaveCameraSource()} disabled={!selectedCamera || isSavingSource} className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 transition-colors flex-shrink-0 h-[38px] min-w-[90px]">
+                            <Save className="w-3.5 h-3.5" />
+                            <span>{isSavingSource ? "Menyimpan" : "Simpan"}</span>
                           </button>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* Tab: Webcam Lokal */}
+                    {sourceTab === "webcam" && (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-[11px] pwa:text-[12px] text-slate-500 font-medium leading-relaxed">
+                          Gunakan kamera bawaan perangkat ini (laptop/HP) sebagai sumber video live.
+                        </p>
+
+                        <button
+                          onClick={handleToggleLocalWebcam}
+                          disabled={!selectedCamera}
+                          className={cn(
+                            "w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-[13px] transition-all shadow-sm",
+                            localWebcamActive
+                              ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+                              : "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500"
+                          )}
+                        >
+                          <Smartphone className="w-4 h-4" />
+                          {localWebcamActive ? "Matikan Webcam" : "Aktifkan Webcam"}
+                        </button>
+
+                        {(sourceType === "local-webcam" || localWebcamActive) && (
+                          <div className="flex flex-col lg:flex-row gap-2.5">
+                            <Popover open={isVideoDeviceOpen} onOpenChange={setIsVideoDeviceOpen}>
+                              <PopoverTrigger className="flex items-center justify-between gap-1.5 pwa:gap-2 px-3 py-2 bg-white border border-slate-200 shadow-sm rounded-xl text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors w-full flex-1 min-w-0 h-[38px] outline-none focus-visible:ring-4 focus-visible:ring-blue-100 focus-visible:border-blue-400">
+                                <span className="truncate">
+                                  {videoDevices.find(d => d.deviceId === selectedVideoDeviceId)?.label || (selectedVideoDeviceId ? `Kamera ${selectedVideoDeviceId.substring(0, 5)}...` : "Kamera default browser")}
+                                </span>
+                                <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[300px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                                <button
+                                  onClick={() => {
+                                    if (!selectedCamera) return;
+                                    setIsPlaying(true); setSourceStatusState("starting"); setSourceMessage("Mengganti kamera lokal...");
+                                    setLocalDeviceByCameraId((current) => ({ ...current, [selectedCamera.id]: "" }));
+                                    setIsVideoDeviceOpen(false);
+                                  }}
+                                  className={cn(
+                                    "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left",
+                                    !selectedVideoDeviceId ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
+                                  )}
+                                >
+                                  Kamera default browser
+                                  {!selectedVideoDeviceId && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
+                                </button>
+                                {videoDevices.map((device) => (
+                                  <button
+                                    key={device.deviceId}
+                                    onClick={() => {
+                                      if (!selectedCamera) return;
+                                      setIsPlaying(true); setSourceStatusState("starting"); setSourceMessage("Mengganti kamera lokal...");
+                                      setLocalDeviceByCameraId((current) => ({ ...current, [selectedCamera.id]: device.deviceId }));
+                                      setIsVideoDeviceOpen(false);
+                                    }}
+                                    className={cn(
+                                      "flex items-center justify-between w-full px-3 py-2 text-[12px] rounded-lg transition-colors text-left mt-0.5",
+                                      selectedVideoDeviceId === device.deviceId ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50 font-medium"
+                                    )}
+                                  >
+                                    <span className="truncate">{device.label || `Kamera ${device.deviceId.substring(0, 5)}...`}</span>
+                                    {selectedVideoDeviceId === device.deviceId && <Check className="w-3.5 h-3.5 text-blue-600 ml-2 flex-shrink-0" />}
+                                  </button>
+                                ))}
+                              </PopoverContent>
+                            </Popover>
+                            <button
+                              onClick={() => void refreshVideoDevices()}
+                              disabled={isRefreshingDevices}
+                              className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[12px] font-bold text-slate-600 hover:bg-slate-50 disabled:text-slate-400 transition-colors shadow-sm flex-shrink-0"
+                            >
+                              <RefreshCw className={cn("w-3.5 h-3.5", isRefreshingDevices && "animate-spin")} />
+                              Refresh
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => void handleSaveCameraSource()} disabled={!selectedCamera || isSavingSource} className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 transition-colors flex-shrink-0 h-[38px] min-w-[90px]">
+                            <Save className="w-3.5 h-3.5" />
+                            <span>{isSavingSource ? "Menyimpan" : "Simpan"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab: Pengaturan Lanjutan */}
+                    {sourceTab === "advanced" && (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-[11px] pwa:text-[12px] text-slate-500 font-medium leading-relaxed">
+                          Opsi lanjutan untuk menghubungkan perangkat lain sebagai sumber kamera.
+                        </p>
+
+                        <div className="flex flex-col gap-2">
+                          <button onClick={handleOpenCameraStation} disabled={!selectedCamera} className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors shadow-sm text-left">
+                            <div className="w-9 h-9 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <MonitorUp className="w-4 h-4 text-emerald-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] pwa:text-[13px] font-bold text-[#1e293b]">Mode Station</p>
+                              <p className="text-[10px] pwa:text-[11px] text-slate-500">Buka halaman kamera station khusus</p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          </button>
+
+                          <button onClick={() => void handleOpenDevicePublisher()} disabled={!selectedCamera || isOpeningPublisher || isSavingSource} className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors shadow-sm text-left">
+                            <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <Signal className={cn("w-4 h-4 text-blue-600", isOpeningPublisher && "animate-pulse")} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] pwa:text-[13px] font-bold text-[#1e293b]">{isOpeningPublisher ? "Membuka Publisher..." : "Jadikan Kamera"}</p>
+                              <p className="text-[10px] pwa:text-[11px] text-slate-500">Buka WebRTC publisher dari perangkat ini</p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          </button>
+
+                          <button onClick={() => void handleCopyRaspberryPiCommand()} disabled={!selectedCamera || isCopyingPiCommand || isSavingSource} className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors shadow-sm text-left">
+                            <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <Copy className={cn("w-4 h-4 text-slate-600", isCopyingPiCommand && "animate-pulse")} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] pwa:text-[13px] font-bold text-[#1e293b]">{isCopyingPiCommand ? "Menyalin..." : "Copy Raspberry Pi"}</p>
+                              <p className="text-[10px] pwa:text-[11px] text-slate-500">Salin command install untuk Raspberry Pi</p>
+                            </div>
+                            <Copy className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {sourceMessage && (
@@ -1544,6 +1672,75 @@ export default function LiveViewPage() {
 
 
         </div>
+
+        {/* Pi Command Modal */}
+        {piCommandModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pwa:p-6">
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={() => setPiCommandModal(null)} />
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between p-4 pwa:p-5 border-b border-slate-100">
+                <div>
+                  <h3 className="text-[15px] pwa:text-[16px] font-bold text-slate-800">Command Raspberry Pi</h3>
+                  <p className="text-[11px] pwa:text-[12px] text-slate-500 mt-1">Jalankan command ini di terminal Raspberry Pi Anda</p>
+                </div>
+                <button
+                  onClick={() => setPiCommandModal(null)}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors outline-none"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-4 pwa:p-5 bg-slate-50 flex flex-col gap-4">
+                <div className="bg-[#0f172a] rounded-xl overflow-hidden shadow-inner border border-slate-700">
+                  <div className="flex items-center justify-between px-3 py-2 bg-slate-800 border-b border-slate-700/50">
+                    <span className="text-[10px] font-medium text-slate-400 font-mono">bash</span>
+                    <button
+                      onClick={() => {
+                        void copyTextToClipboard(piCommandModal.command);
+                        setSourceStatusState("active");
+                        setSourceMessage("Command berhasil disalin ke clipboard!");
+                      }}
+                      className="flex items-center gap-1.5 text-slate-300 hover:text-white transition-colors"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span className="text-[10px] font-medium">Copy</span>
+                    </button>
+                  </div>
+                  <pre className="p-3 text-[11px] pwa:text-[12px] text-emerald-400 font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">{piCommandModal.command}</pre>
+                </div>
+                
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex gap-2.5 items-start">
+                  <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-[11px] pwa:text-[12px] text-blue-800 leading-relaxed font-medium">
+                    Setelah command dijalankan dan Raspberry Pi berhasil terhubung, stream video akan otomatis masuk ke kamera <span className="font-bold text-blue-900">{piCommandModal.mediaPath}</span>.
+                  </p>
+                </div>
+              </div>
+              
+              <div className="p-4 pwa:p-5 border-t border-slate-100 flex justify-end gap-2 bg-white">
+                <button
+                  onClick={() => setPiCommandModal(null)}
+                  className="px-4 py-2.5 text-[12px] pwa:text-[13px] font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Tutup
+                </button>
+                <button
+                  onClick={() => {
+                    void copyTextToClipboard(piCommandModal.command);
+                    setPiCommandModal(null);
+                    setSourceStatusState("active");
+                    setSourceMessage("Command Raspberry Pi berhasil disalin ke clipboard!");
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 text-[12px] pwa:text-[13px] font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy & Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Add Camera Modal */}
         {isAddCameraModalOpen && (
@@ -2122,115 +2319,28 @@ function getSourceInputPlaceholder(sourceType: CameraSourceType) {
   return "URL stream kamera...";
 }
 
-function normalizeMediaPath(value: string | null) {
-  if (!value) return null;
-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  if (!normalized) return null;
-  return normalized.endsWith("/index.m3u8")
-    ? normalized.slice(0, -"/index.m3u8".length).replace(/^\/+|\/+$/g, "")
-    : normalized;
-}
-
 function looksLikeUrl(value: string) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
 
-function extractMediaPathFromHlsUrl(value: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
   try {
-    const url = new URL(value);
-    return stripMediaGatewayPrefix(normalizeMediaPath(url.pathname), "hls");
-  } catch {
-    return null;
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
   }
-}
-
-function getDevicePublisherMediaPath(camera: CameraType, rawInput: string) {
-  const input = rawInput.trim();
-  if (input) {
-    const inputPath = looksLikeUrl(input)
-      ? extractMediaPathFromHlsUrl(input)
-      : normalizeMediaPath(input);
-    const cleanedInputPath = stripMediaGatewayPrefix(inputPath, "hls");
-    if (cleanedInputPath) return cleanedInputPath;
-  }
-
-  if (camera.mediaPath) {
-    const savedMediaPath = stripMediaGatewayPrefix(camera.mediaPath, "hls");
-    if (savedMediaPath) return savedMediaPath;
-  }
-
-  const savedUrl = camera.liveHlsUrl ?? camera.streamUrl ?? "";
-  const savedUrlPath = savedUrl && looksLikeUrl(savedUrl)
-    ? extractMediaPathFromHlsUrl(savedUrl)
-    : normalizeMediaPath(savedUrl);
-  const cleanedSavedUrlPath = stripMediaGatewayPrefix(savedUrlPath, "hls");
-  if (cleanedSavedUrlPath) return cleanedSavedUrlPath;
-
-  return `browser-${slugifyMediaPath(camera.id || camera.name)}`;
-}
-
-function buildGatewayHlsUrl(mediaPath: string | null) {
-  if (!mediaPath) return "";
-  const baseUrl = getGatewayHlsBaseUrl().replace(/\/+$/g, "");
-  return `${baseUrl}/${encodeMediaPath(mediaPath)}/index.m3u8`;
-}
-
-function buildGatewayWebRtcPublisherUrl(mediaPath: string) {
-  const baseUrl = getGatewayWebRtcBaseUrl().replace(/\/+$/g, "");
-  return `${baseUrl}/${encodeMediaPath(mediaPath)}/publish`;
-}
-
-function getGatewayHlsBaseUrl() {
-  if (process.env.NEXT_PUBLIC_MEDIA_HLS_BASE_URL) {
-    return process.env.NEXT_PUBLIC_MEDIA_HLS_BASE_URL;
-  }
-
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (isLoopbackHost(host)) {
-      return `${window.location.protocol}//${host}:8888`;
-    }
-
-    return `${window.location.origin}/hls`;
-  }
-
-  return "http://localhost:8888";
-}
-
-function getGatewayWebRtcBaseUrl() {
-  if (process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL) {
-    return process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL;
-  }
-
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (isLoopbackHost(host)) {
-      return `${window.location.protocol}//${host}:8889`;
-    }
-
-    return `${window.location.origin}/webrtc`;
-  }
-
-  return "http://localhost:8889";
-}
-
-function encodeMediaPath(mediaPath: string) {
-  return mediaPath.split("/").map((part) => encodeURIComponent(part)).join("/");
-}
-
-function stripMediaGatewayPrefix(mediaPath: string | null, prefix: string) {
-  if (!mediaPath) return null;
-  const cleanPath = mediaPath.trim().replace(/^\/+|\/+$/g, "");
-  if (!cleanPath || cleanPath === prefix) return null;
-  return cleanPath.startsWith(`${prefix}/`) ? cleanPath.slice(prefix.length + 1) : cleanPath;
-}
-
-function slugifyMediaPath(value: string) {
-  return value.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "camera";
-}
-
-function isLoopbackHost(host: string) {
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
 function getUnsupportedSourceTestMessage(sourceType: CameraSourceType) {
   if (sourceType === "rtsp") return "Format belum support di browser: RTSP perlu media gateway ke HLS/WebRTC.";

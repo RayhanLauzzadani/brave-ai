@@ -1,0 +1,17 @@
+[Unit]
+Description=BRAVE AI Raspberry Pi Camera Publisher
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/brave-ai-camera.env
+ExecStart=/usr/local/bin/brave-pi-publisher /etc/brave-ai-camera.env
+Restart=always
+RestartSec=5
+User=bravecam
+SupplementaryGroups=video audio
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

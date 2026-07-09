@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import cast
 from urllib.parse import urlparse
@@ -144,14 +145,25 @@ def _normalize_media_path(value: str | None) -> str | None:
     if not value:
         return None
 
-    normalized = value.strip().strip("/")
+    normalized = value.strip().replace("\\", "/").strip("/")
     if not normalized:
         return None
 
-    normalized = normalized.replace("\\", "/")
     if normalized.endswith("/index.m3u8"):
-        normalized = normalized[: -len("/index.m3u8")]
-    return normalized.strip("/") or None
+        normalized = normalized[: -len("/index.m3u8")].strip("/")
+
+    safe_segments = [
+        _slugify_media_path(segment)
+        for segment in normalized.split("/")
+        if _slugify_media_path(segment)
+    ]
+    return "/".join(safe_segments) or None
+
+
+def _slugify_media_path(value: str) -> str:
+    normalized = value.strip().lower()
+    normalized = re.sub(r"[^a-z0-9_-]+", "-", normalized)
+    return normalized.strip("-")
 
 
 def _looks_like_url(value: str) -> bool:
