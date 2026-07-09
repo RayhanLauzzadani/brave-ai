@@ -1,0 +1,56 @@
+# BRAVE AI CCTV - MediaMTX local development config
+# MediaMTX turns camera streams into browser-friendly HLS/WebRTC streams and
+# records them as small server-side segments for playback/evidence workflows.
+
+logLevel: info
+logDestinations: [stdout]
+
+# Control API for future FastAPI integration.
+api: true
+apiAddress: :9997
+apiAllowOrigins: ["*"]
+
+# Playback API for recorded segments.
+playback: true
+playbackAddress: :9996
+playbackAllowOrigins: ["*"]
+
+# RTSP ingest/read. TCP-only avoids UDP port conflicts with FastAPI dev port 8000.
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+# HLS playback for the Next.js live camera player.
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: ["*"]
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsAlwaysRemux: false
+
+# WebRTC read/publish foundation for the next phase.
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: true
+
+pathDefaults:
+  # Pull/publish sources are recorded by the gateway, not by the browser.
+  record: true
+  recordPath: /recordings/%path/%Y-%m-%d/%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 10s
+  recordDeleteAfter: 7d
+
+  # Keep sources active for CCTV-style monitoring and recording.
+  sourceOnDemand: false
+
+paths:
+  # Dynamic paths: camera-1, camera-2, etc.
+  # Publish to: rtsp://localhost:8554/camera-1
+  # Watch HLS:  http://localhost:8888/camera-1/index.m3u8
+  all_others:

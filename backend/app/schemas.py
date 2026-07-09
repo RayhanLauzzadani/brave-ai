@@ -40,6 +40,8 @@ class Camera(BaseModel):
     location: str
     status: CameraStatus
     stream_url: str | None = Field(default=None, alias="streamUrl")
+    media_path: str | None = Field(default=None, alias="mediaPath")
+    live_hls_url: str | None = Field(default=None, alias="liveHlsUrl")
     source_type: CameraSourceType = Field(default="mock", alias="sourceType")
     thumbnail_url: str | None = Field(default=None, alias="thumbnailUrl")
     last_active: datetime = Field(alias="lastActive")
@@ -48,10 +50,19 @@ class Camera(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CameraCreate(BaseModel):
+    name: str
+    location: str
+    is_ai_enabled: bool = Field(default=True, alias="isAiEnabled")
+    source_type: CameraSourceType = Field(default="mock", alias="sourceType")
+
+    model_config = {"populate_by_name": True}
+
 
 class CameraSourceUpdate(BaseModel):
     source_type: CameraSourceType = Field(alias="sourceType")
     stream_url: str | None = Field(default=None, alias="streamUrl")
+    media_path: str | None = Field(default=None, alias="mediaPath")
     thumbnail_url: str | None = Field(default=None, alias="thumbnailUrl")
 
     model_config = {"populate_by_name": True}
@@ -76,6 +87,19 @@ class Recording(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RecordingSegment(BaseModel):
+    id: str
+    camera_id: str = Field(alias="cameraId")
+    media_path: str = Field(alias="mediaPath")
+    file_path: str = Field(alias="filePath")
+    media_url: str | None = Field(default=None, alias="mediaUrl")
+    start_time: datetime = Field(alias="startTime")
+    end_time: datetime = Field(alias="endTime")
+    duration: int
+    file_size: int = Field(alias="fileSize")
+
+    model_config = {"populate_by_name": True}
+
 class EvidenceClipRequest(BaseModel):
     camera_id: str = Field(alias="cameraId")
     start_time: datetime = Field(alias="startTime")
@@ -88,8 +112,13 @@ class EvidenceClipRequest(BaseModel):
 class EvidenceClipResponse(BaseModel):
     id: str
     recording_id: str = Field(alias="recordingId")
+    camera_id: str = Field(alias="cameraId")
+    start_time: datetime = Field(alias="startTime")
+    end_time: datetime = Field(alias="endTime")
+    reason: str
     clip_url: str = Field(alias="clipUrl")
     status: Literal["queued", "processing", "ready"]
+    created_at: datetime = Field(alias="createdAt")
 
     model_config = {"populate_by_name": True}
 

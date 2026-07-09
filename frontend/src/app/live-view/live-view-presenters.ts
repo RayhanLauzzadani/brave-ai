@@ -22,125 +22,27 @@ export type QuickRecordingItem = {
   img: string;
 };
 
+export const LIVE_VIEW_INITIAL_TIME_ISO = "2026-07-07T03:00:00.000Z";
+const FALLBACK_OFFLINE_TIME_ISO = "2026-07-07T01:00:00.000Z";
+const FALLBACK_ACTIVITY_TIMES = [
+  "2026-07-07T03:05:00.000Z",
+  "2026-07-07T02:30:00.000Z",
+  "2026-07-07T02:10:00.000Z",
+];
+const DISPLAY_TIME_ZONE = "Asia/Jakarta";
+
 export const CAMERA_IMAGES = [
-  "https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1590402494682-cd3fb53b1f70?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1200&auto=format&fit=crop",
+  "/thumbnails/cctv1.png",
+  "/thumbnails/cctv2.png",
+  "/thumbnails/cctv3.png",
+  "/thumbnails/cctv4.png",
 ];
 
-export const FALLBACK_CAMERAS: Camera[] = [
-  {
-    id: "cam-001",
-    name: "Koridor Lantai 2",
-    location: "Gedung A Lt. 2",
-    status: "recording",
-    streamUrl: null,
-    sourceType: "mock",
-    thumbnailUrl: CAMERA_IMAGES[0],
-    lastActive: new Date().toISOString(),
-    isAiEnabled: true,
-  },
-  {
-    id: "cam-002",
-    name: "Halaman Depan",
-    location: "Gedung A Lt. 1",
-    status: "online",
-    streamUrl: null,
-    sourceType: "mock",
-    thumbnailUrl: CAMERA_IMAGES[1],
-    lastActive: new Date().toISOString(),
-    isAiEnabled: true,
-  },
-  {
-    id: "cam-003",
-    name: "Kantin Sekolah",
-    location: "Gedung B Lt. 1",
-    status: "online",
-    streamUrl: null,
-    sourceType: "mock",
-    thumbnailUrl: CAMERA_IMAGES[2],
-    lastActive: new Date().toISOString(),
-    isAiEnabled: true,
-  },
-  {
-    id: "cam-004",
-    name: "Kelas IX B",
-    location: "Gedung C Lt. 2",
-    status: "offline",
-    streamUrl: null,
-    sourceType: "mock",
-    thumbnailUrl: CAMERA_IMAGES[3],
-    lastActive: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    isAiEnabled: false,
-  },
-];
+export const FALLBACK_CAMERAS: Camera[] = [];
 
-export const FALLBACK_ACTIVITIES: ActivityItem[] = [
-  {
-    id: "fallback-activity-1",
-    time: "10:05",
-    date: "",
-    loc: "Koridor Lantai 2",
-    locationDetail: "Gedung A Lt. 2",
-    title: "Indikasi verbal bullying",
-    desc: "Terdengar kata-kata kasar",
-    status: "Dalam Proses",
-    color: "text-red-500",
-    bg: "bg-red-50",
-    badge: "bg-orange-50 text-orange-600 border border-orange-100",
-  },
-  {
-    id: "fallback-activity-2",
-    time: "09:30",
-    date: "",
-    loc: "Kelas IX B",
-    locationDetail: "Gedung C Lt. 2",
-    title: "Kerumunan terdeteksi",
-    desc: "Kerumunan siswa di kelas",
-    status: "Ditinjau",
-    color: "text-blue-500",
-    bg: "bg-blue-50",
-    badge: "bg-blue-50 text-blue-600 border border-blue-100",
-  },
-  {
-    id: "fallback-activity-3",
-    time: "09:10",
-    date: "",
-    loc: "Kantin Sekolah",
-    locationDetail: "Gedung B Lt. 1",
-    title: "Dorongan antar siswa",
-    desc: "Terjadi dorongan ringan",
-    status: "Selesai",
-    color: "text-emerald-500",
-    bg: "bg-emerald-50",
-    badge: "bg-emerald-50 text-emerald-600 border border-emerald-100",
-  },
-];
+export const FALLBACK_ACTIVITIES: ActivityItem[] = [];
 
-export const FALLBACK_RECORDINGS: QuickRecordingItem[] = [
-  {
-    id: "fallback-rec-1",
-    title: "Koridor Lantai 2",
-    time: "10:15 WIB",
-    duration: "01:25",
-    img: CAMERA_IMAGES[0],
-  },
-  {
-    id: "fallback-rec-2",
-    title: "Kelas IX B",
-    time: "09:45 WIB",
-    duration: "00:58",
-    img: CAMERA_IMAGES[3],
-  },
-  {
-    id: "fallback-rec-3",
-    title: "Kantin Sekolah",
-    time: "09:20 WIB",
-    duration: "01:10",
-    img: CAMERA_IMAGES[2],
-  },
-];
+export const FALLBACK_RECORDINGS: QuickRecordingItem[] = [];
 
 export function isPlaceholderThumbnail(url?: string | null) {
   return !url || url.includes("cam-placeholder");
@@ -167,6 +69,7 @@ export function formatClock(value: Date | string | undefined) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    timeZone: DISPLAY_TIME_ZONE,
   }).format(date);
 }
 
@@ -175,6 +78,7 @@ export function formatTime(value: Date | string | undefined) {
   return new Intl.DateTimeFormat("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DISPLAY_TIME_ZONE,
   }).format(date);
 }
 
@@ -184,6 +88,7 @@ export function formatDisplayDate(value: Date | string | undefined) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: DISPLAY_TIME_ZONE,
   }).format(date);
 }
 
@@ -192,13 +97,14 @@ export function formatMobileDate(value: Date | string | undefined) {
   return new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
     month: "2-digit",
+    timeZone: DISPLAY_TIME_ZONE,
   }).format(date);
 }
 
 export function toActivityItems(logs: BullyingLog[], fallback = FALLBACK_ACTIVITIES) {
   if (logs.length === 0) {
     return fallback.map((item, index) => {
-      const timestamp = new Date(Date.now() - index * 35 * 60 * 1000);
+      const timestamp = FALLBACK_ACTIVITY_TIMES[index] ?? LIVE_VIEW_INITIAL_TIME_ISO;
       return {
         ...item,
         time: formatTime(timestamp),
@@ -237,8 +143,8 @@ export function toQuickRecordingItems(recordings: Recording[]) {
 }
 
 function toDate(value: Date | string | undefined) {
-  const date = value instanceof Date ? value : new Date(value ?? Date.now());
-  return Number.isNaN(date.getTime()) ? new Date() : date;
+  const date = value instanceof Date ? value : new Date(value ?? LIVE_VIEW_INITIAL_TIME_ISO);
+  return Number.isNaN(date.getTime()) ? new Date(LIVE_VIEW_INITIAL_TIME_ISO) : date;
 }
 
 function getSeverityStyle(severity: BullyingLog["severity"]) {

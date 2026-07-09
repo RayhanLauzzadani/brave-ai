@@ -1,0 +1,97 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: brave-ai-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_HOST: ${APP_HOST:-brave-ai.web.id}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - brave_caddy_data:/data
+      - brave_caddy_config:/config
+    depends_on:
+      - frontend
+      - api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_ORIGIN: http://api:8000
+        LAN_HOST: ${APP_HOST:-brave-ai.web.id}
+    container_name: brave-ai-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_ORIGIN: http://api:8000
+      LAN_HOST: ${APP_HOST:-brave-ai.web.id}
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: brave-ai-api
+    restart: unless-stopped
+    environment:
+      APP_NAME: BRAVE AI API
+      ENVIRONMENT: production
+      API_PREFIX: /api
+      DATABASE_URL: postgresql+asyncpg://brave:${POSTGRES_PASSWORD}@postgres:5432/brave_ai
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: '["https://${APP_HOST:-brave-ai.web.id}","http://${APP_HOST:-brave-ai.web.id}","http://148.230.103.197"]'
+      MEDIA_HLS_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/hls
+      MEDIA_RECORDINGS_DIR: /recordings
+      MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 10
+      SECRET_KEY: ${SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+    volumes:
+      - ./media/recordings:/recordings:ro
+    depends_on:
+      - postgres
+      - redis
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: brave-ai-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"
+      - "8888:8888"
+      - "8889:8889"
+      - "8189:8189/udp"
+      - "9996:9996"
+      - "9997:9997"
+    volumes:
+      - ./media/mediamtx.yml:/mediamtx.yml:ro
+      - ./media/recordings:/recordings
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: brave-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: brave_ai
+      POSTGRES_USER: brave
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - brave_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: brave-ai-redis
+    restart: unless-stopped
+    volumes:
+      - brave_redis_data:/data
+
+volumes:
+  brave_postgres_data:
+  brave_redis_data:
+  brave_caddy_data:
+  brave_caddy_config:

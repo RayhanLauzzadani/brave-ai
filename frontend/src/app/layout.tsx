@@ -46,8 +46,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={`${plusJakartaSans.variable} ${poppins.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-[#060a13]">{children}</body>
+    <html lang="id" suppressHydrationWarning className={`${plusJakartaSans.variable} ${poppins.variable} h-full antialiased`}>
+      <body className="font-sans min-h-full flex flex-col bg-[#060a13]" suppressHydrationWarning>{children}</body>
     </html>
   );
 }

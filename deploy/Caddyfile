@@ -1,0 +1,27 @@
+(brave_ai_app) {
+	encode gzip zstd
+
+	@api path /api/*
+	reverse_proxy @api api:8000
+
+	@ws path /ws/*
+	reverse_proxy @ws api:8000
+
+	handle_path /hls/* {
+		reverse_proxy mediamtx:8888
+	}
+
+	handle_path /playback/* {
+		reverse_proxy mediamtx:9996
+	}
+
+	reverse_proxy frontend:3000
+}
+
+{$APP_HOST} {
+	import brave_ai_app
+}
+
+http://:80 {
+	import brave_ai_app
+}

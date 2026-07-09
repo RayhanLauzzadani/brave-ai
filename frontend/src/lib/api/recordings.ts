@@ -1,12 +1,13 @@
 // ==========================================
 // BRAVE AI - Recordings API
-// Minimal helpers used by Live View.
+// Minimal helpers used by Live View and Recording View.
 // ==========================================
 
 import {
   EvidenceClipRequest,
   EvidenceClipResponse,
   Recording,
+  RecordingSegment,
 } from "@/lib/types";
 import { apiClient } from "@/lib/api/client";
 
@@ -35,6 +36,23 @@ export async function getRecordings(filters?: {
   return apiClient<Recording[]>(`/recordings${query ? `?${query}` : ""}`);
 }
 
+/** List MediaMTX recording segments discovered by the backend. */
+export async function getRecordingSegments(filters?: {
+  cameraId?: string;
+  mediaPath?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<RecordingSegment[]> {
+  const params = new URLSearchParams();
+  if (filters?.cameraId) params.set("cameraId", filters.cameraId);
+  if (filters?.mediaPath) params.set("mediaPath", filters.mediaPath);
+  if (filters?.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters?.dateTo) params.set("dateTo", filters.dateTo);
+
+  const query = params.toString();
+  return apiClient<RecordingSegment[]>(`/recordings/segments${query ? `?${query}` : ""}`);
+}
+
 /** Get one recording by ID. */
 export async function getRecordingById(
   id: string
@@ -44,6 +62,15 @@ export async function getRecordingById(
   } catch {
     return undefined;
   }
+}
+
+/** List evidence clips queued/exported for a recording. */
+export async function getEvidenceClips(
+  recordingId: string
+): Promise<EvidenceClipResponse[]> {
+  return apiClient<EvidenceClipResponse[]>(
+    `/recordings/${encodeURIComponent(recordingId)}/clips`
+  );
 }
 
 /** Queue an evidence clip export. */

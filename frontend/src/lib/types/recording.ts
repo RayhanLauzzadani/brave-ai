@@ -33,6 +33,22 @@ export interface EvidenceClipRequest {
 export interface EvidenceClipResponse {
   id: string;
   recordingId: string;
+  cameraId: string;
+  startTime: string;
+  endTime: string;
+  reason: string;
   clipUrl: string;
   status: "queued" | "processing" | "ready";
+  createdAt: string;
+}
+export interface RecordingSegment {
+  id: string;
+  cameraId: string;
+  mediaPath: string;
+  filePath: string;
+  mediaUrl: string | null;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  fileSize: number;
 }

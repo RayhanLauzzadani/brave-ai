@@ -22,7 +22,11 @@ import {
   Play,
   RefreshCw,
   Search,
+  VideoOff,
+  Film,
   ShieldCheck,
+  X,
+  SlidersHorizontal,
 } from "lucide-react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
@@ -32,6 +36,7 @@ import {
   SheetContent,
   SheetTrigger,
   SheetTitle,
+  SheetClose,
 } from "@/components/ui/sheet";
 import { TimelineScrubber } from "@/components/ui/timeline-scrubber";
 import {
@@ -84,6 +89,7 @@ export default function RekamanPage() {
   const [isLokasiOpen, setIsLokasiOpen] = useState(false);
   const [isKameraOpen, setIsKameraOpen] = useState(false);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [selectedLokasi, setSelectedLokasi] = useState("all");
   const [selectedKamera, setSelectedKamera] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState<"all" | RecordingStatus>("all");
@@ -310,7 +316,7 @@ export default function RekamanPage() {
               </SheetContent>
             </Sheet>
           </div>
-          
+
           <div className="flex flex-col min-w-0 flex-1">
             <h1 className="text-[18px] pwa:text-[20px] font-bold text-[#0f172a] tracking-tight leading-tight truncate">Rekaman</h1>
             <p className="text-[11px] font-desc text-slate-500 truncate mt-0.5">Kelola rekaman video tersimpan sebagai bukti kejadian dengan aman.</p>
@@ -351,26 +357,31 @@ export default function RekamanPage() {
         <div className="hidden lg:block h-10" />
 
         {/* Filter and Search Bar */}
-        <div className="flex flex-col pwa:flex-row gap-2.5 pwa:gap-4 mb-6">
+        <div className="flex flex-col gap-3 pwa:flex-row pwa:gap-4 mb-6">
+          {/* Search Bar — pill shape on mobile, standard on tablet+ */}
           <div className="relative flex-1">
-            <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text" 
+            <Search className="w-[18px] h-[18px] pwa:w-5 pwa:h-5 text-slate-400 absolute left-3.5 pwa:left-4 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Cari kamera, lokasi, atau tanggal..." 
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] pwa:text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400 shadow-sm"
+              placeholder="Cari kamera, lokasi, atau tanggal..."
+              className="w-full pl-10 pwa:pl-10 pr-4 py-2.5 pwa:py-2.5 bg-white rounded-full pwa:rounded-xl border border-slate-200/60 pwa:border-slate-200 text-[13px] pwa:text-sm outline-none focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15 pwa:focus:border-blue-500 pwa:focus:ring-1 pwa:focus:ring-blue-500 transition-all placeholder:text-slate-400 pwa:shadow-sm"
             />
           </div>
-          <div className="flex overflow-x-auto hide-scrollbar gap-2 pb-1 pwa:pb-0 pwa:items-center">
+          {/* Filter Chips */}
+          <div className="flex overflow-x-auto hide-scrollbar gap-2 pb-0.5 pwa:pb-0 pwa:items-center -mx-1 px-1 pwa:mx-0 pwa:px-0">
+            {/* 1. Date Filter: Always visible on mobile and desktop */}
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
               <PopoverTrigger className={cn(
-                "flex items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors",
-                !date && "text-slate-500"
+                "flex shrink-0 items-center gap-1.5 px-3.5 py-[7px] pwa:px-4 pwa:py-2.5 rounded-full pwa:rounded-xl text-[12px] pwa:text-sm font-semibold pwa:font-medium whitespace-nowrap transition-all",
+                date
+                  ? "bg-blue-50 text-[#064eb7] border border-blue-200 pwa:bg-white pwa:text-slate-700 pwa:border-slate-200 pwa:shadow-sm"
+                  : "bg-white text-slate-600 border border-slate-200/60 pwa:bg-white pwa:text-slate-500 pwa:border-slate-200 pwa:shadow-sm"
               )}>
-                <CalendarIcon className="w-4 h-4 text-slate-400 pwa:text-slate-500" /> 
-                {date ? format(date, "d MMM yyyy", { locale: id }) : <span>Tanggal</span>} 
-                <ChevronDown className="w-4 h-4 text-slate-400" />
+                <CalendarIcon className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" />
+                {date ? format(date, "d MMM yyyy", { locale: id }) : <span>Tanggal</span>}
+                <ChevronDown className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 opacity-50" />
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0 bg-white border border-slate-200 shadow-lg rounded-xl text-slate-800" align="start">
                 <div className="[&_[data-selected-single=true]]:!bg-[#1b64f2] [&_[data-selected-single=true]]:!text-white [&_.bg-muted]:!bg-slate-100 [&_.text-muted-foreground]:!text-slate-500 [&_.hover\:bg-accent]:hover:!bg-slate-50">
@@ -386,90 +397,240 @@ export default function RekamanPage() {
               </PopoverContent>
             </Popover>
 
-            <Popover open={isLokasiOpen} onOpenChange={setIsLokasiOpen}>
-              <PopoverTrigger className="flex items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <MapPin className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {lokasiOptions.find((option) => option.value === selectedLokasi)?.label ?? "Lokasi"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {lokasiOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedLokasi(option.value); setIsLokasiOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedLokasi === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedLokasi === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+            {/* 2. Unified Filter Button (Mobile Only) */}
+            <div className="pwa:hidden">
+              <Sheet open={isMobileFilterOpen} onOpenChange={setIsMobileFilterOpen}>
+                <SheetTrigger className={cn(
+                  "flex shrink-0 items-center gap-1.5 px-3.5 py-[7px] rounded-full text-[12px] font-semibold whitespace-nowrap transition-all",
+                  (selectedLokasi !== "all" || selectedStatus !== "all" || selectedKamera !== "all")
+                    ? "bg-blue-50 text-[#064eb7] border border-blue-200"
+                    : "bg-white text-slate-600 border border-slate-200/60"
+                )}>
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  Filter
+                  <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+                </SheetTrigger>
+                <SheetContent side="bottom" showCloseButton={false} className="rounded-t-[20px] px-0 pb-0 pt-0 max-h-[85vh] flex flex-col bg-white"
+                  onPointerDown={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    el.dataset.swipeY = String(e.clientY);
+                  }}
+                  onPointerUp={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    const startY = Number(el.dataset.swipeY || 0);
+                    if (startY && e.clientY - startY > 60) setIsMobileFilterOpen(false);
+                    el.dataset.swipeY = "";
+                  }}
+                >
+                  {/* Handle bar — swipe area */}
+                  <div className="pt-3 pb-2 cursor-grab">
+                    <div className="w-9 h-[3px] bg-slate-300 rounded-full mx-auto" />
+                  </div>
 
-            <Popover open={isKameraOpen} onOpenChange={setIsKameraOpen}>
-              <PopoverTrigger className="flex items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <Camera className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {kameraOptions.find((option) => option.value === selectedKamera)?.label ?? "Kamera"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {kameraOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedKamera(option.value); setIsKameraOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedKamera === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedKamera === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-5 pb-3">
+                    <SheetTitle className="text-[15px] font-bold text-[#0f172a]">Filter</SheetTitle>
+                    <SheetClose className="p-1.5 -mr-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                      <X className="w-5 h-5" />
+                    </SheetClose>
+                  </div>
 
-            <Popover open={isStatusOpen} onOpenChange={setIsStatusOpen}>
-              <PopoverTrigger className="flex items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <ShieldCheck className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label ?? "Status"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {STATUS_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedStatus(option.value); setIsStatusOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedStatus === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedStatus === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+                  {/* Separator + Reset */}
+                  <div className="flex items-center justify-between px-5 py-2.5 border-y border-slate-100 bg-slate-50/50">
+                    <span className="text-[12px] font-medium text-slate-400 uppercase tracking-wider">Pilih filter</span>
+                    <button
+                      onClick={() => {
+                        setSelectedLokasi("all");
+                        setSelectedStatus("all");
+                        setSelectedKamera("all");
+                      }}
+                      className="text-[13px] font-semibold text-[#064eb7] hover:text-[#053e94] transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="overflow-y-auto px-5 py-5 space-y-6 flex-1">
+                    {/* Lokasi */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Lokasi</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {lokasiOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedLokasi(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedLokasi === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Status</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {STATUS_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedStatus(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedStatus === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Kamera */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Kamera</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {kameraOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedKamera(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedKamera === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="px-5 py-4 border-t border-slate-100 bg-white">
+                    <button
+                      onClick={() => setIsMobileFilterOpen(false)}
+                      className="w-full bg-[#064eb7] hover:bg-[#053e94] active:scale-[0.98] text-white rounded-2xl py-3 text-[14px] font-bold shadow-sm transition-all"
+                    >
+                      Terapkan Filter
+                    </button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            {/* 3. Desktop Filter Dropdowns (Tablet+ Only) */}
+            <div className="hidden pwa:flex items-center gap-2">
+              <Popover open={isLokasiOpen} onOpenChange={setIsLokasiOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedLokasi !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <MapPin className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
+                  {lokasiOptions.find((option) => option.value === selectedLokasi)?.label ?? "Lokasi"}
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {lokasiOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedLokasi(option.value); setIsLokasiOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedLokasi === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedLokasi === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              <Popover open={isKameraOpen} onOpenChange={setIsKameraOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedKamera !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <Camera className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
+                  {kameraOptions.find((option) => option.value === selectedKamera)?.label ?? "Kamera"}
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {kameraOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedKamera(option.value); setIsKameraOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedKamera === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedKamera === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              <Popover open={isStatusOpen} onOpenChange={setIsStatusOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedStatus !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <ShieldCheck className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
+                  {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label ?? "Status"}
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {STATUS_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedStatus(option.value); setIsStatusOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedStatus === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedStatus === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
         </div>
 
         {/* Main Content Area */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-8 flex flex-col">
-            <div className="bg-white rounded-2xl pwa:rounded-[24px] border border-slate-100 shadow-sm overflow-hidden mb-6">
+            <div className="bg-white rounded-2xl pwa:rounded-[24px] border border-slate-100 shadow-sm overflow-hidden mb-4 pwa:mb-6">
               <div className="flex items-center justify-between p-4 pwa:p-5 border-b-0 pwa:border-b border-slate-100">
-                <h2 className="text-[15px] pwa:text-lg font-bold text-[#1e293b]">Daftar Rekaman</h2>
+                <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Daftar Rekaman</h2>
                 <button onClick={() => void loadRecordingData()} className="flex items-center gap-0.5 text-[11px] pwa:text-sm font-medium text-blue-500 pwa:text-slate-500 cursor-pointer hover:text-blue-600 pwa:hover:text-slate-800 transition-colors bg-transparent pwa:bg-slate-50 px-1 pwa:px-3 py-1 pwa:py-1.5 rounded-lg pwa:border pwa:border-slate-100">
                   <RefreshCw className={cn("w-3.5 h-3.5 pwa:w-4 pwa:h-4", isLoading && "animate-spin")} />
                   Muat Ulang
                 </button>
               </div>
-              
-              <div className="flex flex-col gap-2 pwa:gap-0 px-4 pwa:px-0 pb-4 pwa:pb-0">
+
+              <div className="flex flex-col px-0 pb-0">
                 {errorMessage ? (
                   <div className="m-0 p-4 pwa:m-4 rounded-xl border border-red-100 bg-red-50 text-red-700 flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 mt-0.5 flex-shrink-0" />
@@ -484,15 +645,21 @@ export default function RekamanPage() {
                 ) : isLoading ? (
                   <div className="p-4 pwa:p-6 text-sm text-slate-500 font-medium">Memuat rekaman 7 hari terakhir...</div>
                 ) : visibleRecords.length === 0 ? (
-                  <div className="p-4 pwa:p-6 text-sm text-slate-500 font-medium">Belum ada rekaman pada rentang waktu ini.</div>
+                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                    <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-full flex items-center justify-center mb-4">
+                      <VideoOff className="w-7 h-7 text-slate-400" />
+                    </div>
+                    <h3 className="text-[14px] pwa:text-[15px] font-bold text-[#1e293b] mb-1.5">Tidak ada rekaman</h3>
+                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[280px]">Belum ada data rekaman pada tanggal, lokasi, atau kamera ini.</p>
+                  </div>
                 ) : (                  visibleRecords.map((record) => (
-                    <div 
-                      key={record.id} 
+                    <div
+                      key={record.id}
                       onClick={() => selectRecord(record)}
-                      className={`flex flex-row pwa:items-center gap-2.5 pwa:gap-4 p-2.5 pwa:p-4 rounded-[12px] pwa:rounded-none border pwa:border-0 pwa:border-b pwa:last:border-0 cursor-pointer transition-colors ${
-                        selectedRecord?.id === record.id 
-                          ? 'border-blue-500 bg-[#f4f7fb] pwa:bg-blue-50/50 pwa:border-b-blue-200' 
-                          : 'border-slate-200 hover:bg-slate-50 bg-white pwa:bg-transparent'
+                      className={`flex flex-row pwa:items-center gap-3 pwa:gap-4 p-3 pwa:p-4 border-b border-slate-100 last:border-0 pwa:last:border-0 cursor-pointer transition-colors ${
+                        selectedRecord?.id === record.id
+                          ? 'bg-blue-50/50 border-b-blue-200'
+                          : 'hover:bg-slate-50 bg-transparent'
                       }`}
                     >
                       <div className="relative w-[100px] pwa:w-40 aspect-[4/3] pwa:aspect-video rounded-[8px] pwa:rounded-xl overflow-hidden flex-shrink-0">
@@ -507,10 +674,10 @@ export default function RekamanPage() {
                         </div>
                       </div>
 
-                      <div className="flex-1 min-w-0 flex flex-col justify-between py-1 pwa:py-0.5">
+                      <div className="flex-1 min-w-0 flex flex-col justify-between py-0">
                         <div>
-                          <h3 className="font-bold text-[#0f172a] text-[13px] pwa:text-[15px] mb-0.5 pwa:mb-1 truncate">{record.cameraName}</h3>
-                          <div className="flex flex-col gap-0.5 pwa:gap-1 text-[10px] pwa:text-xs text-slate-500 mb-2 pwa:mb-0">
+                          <h3 className="text-[13px] pwa:text-[15px] font-bold text-[#1e293b] mb-0.5 pwa:mb-1 truncate">{record.cameraName}</h3>
+                          <div className="flex flex-col gap-0.5 pwa:gap-1 text-[10px] pwa:text-xs text-slate-500">
                             <span className="flex items-center gap-1.5 pwa:hidden">
                               {formatRecordDate(record.startTime)} {formatRecordTime(record.startTime)}
                             </span>
@@ -523,12 +690,12 @@ export default function RekamanPage() {
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between pwa:justify-end gap-2 pwa:gap-3 mt-1.5 pwa:mt-0">
+                        <div className="flex flex-wrap items-center justify-between pwa:justify-end gap-2 pwa:gap-3 mt-auto pwa:mt-0 pt-1.5 pwa:pt-0">
                           <div className={`hidden pwa:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${getStatusStyle(record.status)}`}>
                             {getStatusIcon(record.status)}
                             {getStatusLabel(record.status)}
                           </div>
-                          
+
                           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <button onClick={(event) => { event.stopPropagation(); selectRecord(record); }} className="px-2.5 sm:px-3 pwa:px-3 py-1 pwa:py-1.5 text-blue-600 font-semibold text-[11px] pwa:text-xs bg-white pwa:bg-blue-50 hover:bg-blue-50 pwa:hover:bg-blue-100 rounded-[6px] pwa:rounded-lg transition-colors border border-blue-200 pwa:border-blue-100">
                               Lihat
@@ -552,8 +719,8 @@ export default function RekamanPage() {
                   ))
                 )}
               </div>
-              
-              <div className="flex items-center justify-between p-4 pwa:p-5 border-t border-slate-100 bg-slate-50/50 mt-auto">
+
+              <div className="flex items-center justify-between p-3 pwa:p-5 border-t border-slate-100 bg-slate-50/50 mt-0 pwa:mt-auto">
                 <span className="text-xs text-slate-500 font-medium hidden pwa:block">Menampilkan {visibleRecords.length} dari {records.length} rekaman</span>
                 <div className="flex items-center gap-1 pwa:gap-2 mx-auto pwa:mx-0">
                   <button className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-50" disabled>
@@ -576,9 +743,9 @@ export default function RekamanPage() {
           <div className="lg:col-span-4 flex flex-col">
             <div className="bg-white rounded-2xl pwa:rounded-[24px] border border-slate-100 shadow-sm flex flex-col mb-6 lg:mb-0 overflow-hidden">
               <div className="px-4 py-3.5 pwa:px-5 pwa:py-5 border-b border-slate-100 mb-4 pwa:mb-5">
-                <h2 className="text-[15px] pwa:text-lg font-bold text-[#1e293b]">Detail Rekaman Terpilih</h2>
+                <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Detail Rekaman Terpilih</h2>
               </div>
-              
+
               <div className="px-4 pwa:px-5 pb-4 pwa:pb-5 flex flex-col flex-1">
                 {selectedRecord ? (
                   <>
@@ -608,8 +775,8 @@ export default function RekamanPage() {
                         </span>
                       </div>
                       {selectedAvailable ? (
-                        <TimelineScrubber 
-                          markers={incidentMarkers} 
+                        <TimelineScrubber
+                          markers={incidentMarkers}
                           initialTime={selectedTime}
                           onTimeChange={(time) => setSelectedTime(time)}
                         />
@@ -623,25 +790,25 @@ export default function RekamanPage() {
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
                           <Camera className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Nama Kamera
                         </div>
-                        <div className="flex-1 text-[13px] pwa:text-sm font-bold text-[#1e293b]">{selectedRecord.cameraName}</div>
+                        <div className="flex-1 text-[13px] pwa:text-[14px] font-bold text-[#1e293b]">{selectedRecord.cameraName}</div>
                       </div>
                       <div className="flex items-start">
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
                           <MapPin className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Lokasi
                         </div>
-                        <div className="flex-1 text-[13px] pwa:text-sm font-medium text-[#1e293b]">{selectedRecord.location}</div>
+                        <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">{selectedRecord.location}</div>
                       </div>
                       <div className="flex items-start">
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
                           <Clock className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Waktu Terpilih
                         </div>
-                        <div className="flex-1 text-[13px] pwa:text-sm font-medium text-[#1e293b]">{formatRecordDate(selectedRecord.startTime)} <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{selectedTime}</span></div>
+                        <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">{formatRecordDate(selectedRecord.startTime)} <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{selectedTime}</span></div>
                       </div>
                       <div className="flex items-start">
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
                           <Clock className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Durasi
                         </div>
-                        <div className="flex-1 text-[13px] pwa:text-sm font-medium text-[#1e293b]">{formatDuration(selectedRecord.duration)}</div>
+                        <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">{formatDuration(selectedRecord.duration)}</div>
                       </div>
                       <div className="flex items-start">
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
@@ -657,7 +824,7 @@ export default function RekamanPage() {
                     </div>
 
                     <div className="flex flex-col gap-2.5 mb-5">
-                      <button 
+                      <button
                         onClick={() => openTrimmer()}
                         disabled={!selectedAvailable}
                         className="w-full flex items-center justify-center gap-2 bg-[#1b64f2] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm transition-colors shadow-sm disabled:bg-slate-300 disabled:text-slate-500"
@@ -689,8 +856,12 @@ export default function RekamanPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500 font-medium">
-                    Pilih rekaman untuk melihat detail dan timeline.
+                  <div className="flex-1 flex flex-col items-center justify-center py-16 px-4 text-center">
+                    <div className="w-20 h-20 bg-slate-50 border border-slate-100 rounded-full flex items-center justify-center mb-5">
+                      <Film className="w-9 h-9 text-slate-400" />
+                    </div>
+                    <h3 className="text-[15px] pwa:text-[16px] font-bold text-[#1e293b] mb-2">Pilih Rekaman</h3>
+                    <p className="text-[13px] pwa:text-[14px] text-slate-500 font-medium max-w-[280px] leading-relaxed">Pilih salah satu rekaman di daftar sebelah kiri untuk melihat detail, timestamp, dan memotong klip bukti.</p>
                   </div>
                 )}
               </div>
@@ -701,10 +872,10 @@ export default function RekamanPage() {
         <div className="mb-8">
           <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between p-4 pwa:p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-[#1e293b]">Rekaman Penting</h2>
+              <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Rekaman Penting</h2>
               <button className="text-blue-600 text-sm font-bold hover:underline">Lihat Semua</button>
             </div>
-            
+
             <div className="p-4 pwa:p-5">
               {importantRecords.length === 0 ? (
                 <div className="text-sm text-slate-500 font-medium">Belum ada rekaman penting pada rentang waktu ini.</div>
@@ -725,7 +896,7 @@ export default function RekamanPage() {
                       </div>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-[#1e293b] text-sm truncate">{record.cameraName}</h3>
+                          <h3 className="text-[13px] pwa:text-[15px] font-bold text-[#1e293b] truncate">{record.cameraName}</h3>
                           <p className="text-[11px] text-slate-500 mt-0.5">{formatRecordTime(record.startTime)}</p>
                         </div>
                         <button onClick={() => selectRecord(record)} className="px-3 py-1.5 text-blue-600 text-[11px] font-bold bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">
@@ -742,7 +913,7 @@ export default function RekamanPage() {
       </div>
 
       {selectedRecord && (
-        <VideoTrimmerModal 
+        <VideoTrimmerModal
           isOpen={isTrimmerOpen}
           onClose={() => setIsTrimmerOpen(false)}
           onExport={handleExportClip}

@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:lan": "next dev --hostname 0.0.0.0",
+    "dev:https": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-https-lan.ps1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

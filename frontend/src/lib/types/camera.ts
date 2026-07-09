@@ -19,6 +19,8 @@ export interface Camera {
   location: string;
   status: CameraStatus;
   streamUrl: string | null;
+  mediaPath: string | null;
+  liveHlsUrl: string | null;
   sourceType: CameraSourceType;
   thumbnailUrl: string | null;
   lastActive: string; // ISO 8601
@@ -28,5 +30,6 @@ export interface Camera {
 export interface CameraSourceUpdate {
   sourceType: CameraSourceType;
   streamUrl: string | null;
+  mediaPath?: string | null;
   thumbnailUrl?: string | null;
 }

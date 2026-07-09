@@ -3,18 +3,39 @@
 // Base fetch wrapper for FastAPI communication.
 // ==========================================
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+function getApiBaseUrl() {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
 
-export const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+  if (typeof window !== "undefined") {
+    return "/api";
+  }
+
+  return "http://127.0.0.1:8000/api";
+}
+
+function getWsBaseUrl() {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${window.location.host}/ws`;
+  }
+
+  return "ws://localhost:3000/ws";
+}
+
+export const WS_URL = getWsBaseUrl();
 
 /** Base API client with JSON handling and FastAPI-style error messages. */
 export async function apiClient<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
 
   const response = await fetch(url, {
     headers: {

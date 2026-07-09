@@ -1,8 +1,11 @@
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.data.mock_data import (
+from app.db.session import get_db_session
+from app.repositories.reporting import (
     get_bullying_log,
     list_bullying_logs,
     update_bullying_log_status,
@@ -10,10 +13,12 @@ from app.data.mock_data import (
 from app.schemas import BullyingLog, BullyingLogStatusUpdate
 
 router = APIRouter()
+DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 @router.get("", response_model=list[BullyingLog])
 async def get_logs(
+    session: DbSession,
     camera_id: str | None = Query(default=None, alias="cameraId"),
     severity: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
@@ -23,7 +28,8 @@ async def get_logs(
     date_to: datetime | None = Query(default=None, alias="dateTo"),
     search: str | None = Query(default=None),
 ) -> list[BullyingLog]:
-    return list_bullying_logs(
+    return await list_bullying_logs(
+        session,
         camera_id=camera_id,
         severity=severity,
         status=status_filter,
@@ -36,8 +42,8 @@ async def get_logs(
 
 
 @router.get("/{log_id}", response_model=BullyingLog)
-async def get_log_by_id(log_id: str) -> BullyingLog:
-    log = get_bullying_log(log_id)
+async def get_log_by_id(log_id: str, session: DbSession) -> BullyingLog:
+    log = await get_bullying_log(session, log_id)
     if not log:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -50,8 +56,9 @@ async def get_log_by_id(log_id: str) -> BullyingLog:
 async def update_status(
     log_id: str,
     payload: BullyingLogStatusUpdate,
+    session: DbSession,
 ) -> BullyingLog:
-    log = update_bullying_log_status(log_id, payload.status)
+    log = await update_bullying_log_status(session, log_id, payload.status)
     if not log:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

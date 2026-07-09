@@ -11,6 +11,21 @@ export async function getCameras(): Promise<Camera[]> {
   return apiClient<Camera[]>("/cameras");
 }
 
+/** Create a new camera. */
+export async function createCamera(payload: { name: string, location: string, isAiEnabled?: boolean, sourceType?: string }): Promise<Camera> {
+  return apiClient<Camera>("/cameras", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Delete a camera. */
+export async function deleteCamera(id: string): Promise<void> {
+  return apiClient<void>(`/cameras/${id}`, {
+    method: "DELETE",
+  });
+}
+
 /** Get a single camera by ID. */
 export async function getCameraById(id: string): Promise<Camera | undefined> {
   try {

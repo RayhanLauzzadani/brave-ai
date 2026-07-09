@@ -8,13 +8,31 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
       REDIS_URL: redis://redis:6379/0
+      MEDIA_HLS_BASE_URL: http://localhost:8888
+      MEDIA_RECORDINGS_DIR: /recordings
+      MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 10
     ports:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
+      - ./media/recordings:/recordings:ro
     depends_on:
       - postgres
       - redis
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: brave-ai-mediamtx
+    ports:
+      - "8554:8554" # RTSP ingest/read
+      - "8888:8888" # HLS playback
+      - "8889:8889" # WebRTC HTTP endpoint
+      - "8189:8189/udp" # WebRTC ICE UDP
+      - "9996:9996" # MediaMTX playback API
+      - "9997:9997" # MediaMTX control API
+    volumes:
+      - ./media/mediamtx.yml:/mediamtx.yml:ro
+      - ./media/recordings:/recordings
 
   postgres:
     image: postgres:16-alpine

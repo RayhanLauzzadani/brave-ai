@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
@@ -19,23 +19,28 @@ import {
   Play,
   RefreshCw,
   Search,
+  SearchX,
+  FileText,
   ShieldCheck,
   Tag,
   TriangleAlert,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import {
   Sheet,
   SheetContent,
   SheetTrigger,
   SheetTitle,
+  SheetClose,
 } from "@/components/ui/sheet";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { MobileSidebar } from "@/components/layout/mobile-nav";
 import { getBullyingLogs, updateBullyingLogStatus } from "@/lib/api/bullying-logs";
 import { getCameras } from "@/lib/api/cameras";
-import { getRecordings } from "@/lib/api/recordings";
-import type { BullyType, BullyingLog, Camera as CameraType, LogStatus, Recording } from "@/lib/types";
+import { getEvidenceClips, getRecordings } from "@/lib/api/recordings";
+import type { BullyType, BullyingLog, Camera as CameraType, EvidenceClipResponse, LogStatus, Recording } from "@/lib/types";
 import { useAlertStore } from "@/lib/stores/alert-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/utils";
@@ -83,12 +88,14 @@ function LaporanContent() {
   const [logs, setLogs] = useState<BullyingLog[]>([]);
   const [cameras, setCameras] = useState<CameraType[]>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [evidenceClipsByRecordingId, setEvidenceClipsByRecordingId] = useState<Record<string, EvidenceClipResponse[]>>({});
   const [selectedLogId, setSelectedLogId] = useState<string | null>(queryLogId);
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isLokasiOpen, setIsLokasiOpen] = useState(false);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isKategoriOpen, setIsKategoriOpen] = useState(false);
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [selectedLokasi, setSelectedLokasi] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState<"all" | LogStatus>("all");
   const [selectedKategori, setSelectedKategori] = useState<"all" | BullyType>("all");
@@ -97,6 +104,8 @@ function LaporanContent() {
   const [errorMessage, setErrorMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
+  const [isLoadingEvidenceClips, setIsLoadingEvidenceClips] = useState(false);
+  const [evidenceClipError, setEvidenceClipError] = useState("");
 
   const dateRange = useMemo(() => (date ? getDayRange(date) : null), [date]);
 
@@ -174,6 +183,14 @@ function LaporanContent() {
     () => visibleLogs.find((log) => log.id === selectedLogId) ?? visibleLogs[0] ?? null,
     [selectedLogId, visibleLogs]
   );
+  const selectedRecordingId = selectedLog?.recordingId ?? null;
+  const selectedEvidenceClips = selectedRecordingId
+    ? evidenceClipsByRecordingId[selectedRecordingId] ?? []
+    : [];
+  const selectedEvidenceClip = selectedEvidenceClips[0] ?? null;
+  const selectedRecordingUnavailable = selectedLog?.recording?.storageStatus === "unavailable";
+  const isSelectedEvidenceLoading = !!selectedRecordingId && isLoadingEvidenceClips;
+  const selectedEvidenceClipError = selectedRecordingId ? evidenceClipError : "";
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -188,6 +205,38 @@ function LaporanContent() {
 
     return () => window.clearTimeout(timeout);
   }, [selectedLog, selectedLogId]);
+
+  useEffect(() => {
+    if (!selectedRecordingId) return;
+    if (evidenceClipsByRecordingId[selectedRecordingId]) return;
+
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      setIsLoadingEvidenceClips(true);
+      setEvidenceClipError("");
+
+      getEvidenceClips(selectedRecordingId)
+        .then((clips) => {
+          if (cancelled) return;
+          setEvidenceClipsByRecordingId((current) => ({
+            ...current,
+            [selectedRecordingId]: clips,
+          }));
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setEvidenceClipError(error instanceof Error ? error.message : "Clip bukti belum bisa dimuat.");
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingEvidenceClips(false);
+        });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [evidenceClipsByRecordingId, selectedRecordingId]);
 
   const updateStatus = async (status: LogStatus) => {
     if (!selectedLog) return;
@@ -224,29 +273,32 @@ function LaporanContent() {
   return (
     <div className="bg-[#f4f7fb] min-h-screen -m-4 p-4 pwa:-m-6 pwa:p-6 font-sans text-slate-900 pb-24 pwa:pb-6">
       {/* Mobile Top Bar with Title */}
-      <div className="flex lg:hidden items-center justify-between mb-6">
-        <div className="flex items-center gap-3 pwa:gap-4 flex-1 min-w-0">
-          <div className="hidden pwa:flex items-center">
-            <Sheet>
-              <SheetTrigger render={<button className="p-2 -ml-2 rounded-lg hover:bg-slate-200 transition-colors flex-shrink-0 focus:outline-none" />}>
-                <Menu className="w-6 h-6 text-[#1e293b]" />
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0 bg-[#064eb7] border-white/[0.06] text-white">
-                <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-                <MobileSidebar />
-              </SheetContent>
-            </Sheet>
-          </div>
-          <div className="flex flex-col min-w-0 flex-1">
-            <h1 className="text-[18px] pwa:text-[20px] font-bold text-[#0f172a] tracking-tight leading-tight truncate">Laporan Bullying</h1>
-            <p className="text-[11px] font-desc text-slate-500 truncate mt-0.5">Kelola, tinjau, dan tindak lanjuti laporan kejadian bullying secara terstruktur.</p>
-          </div>
+      <div className="flex lg:hidden items-center justify-between -mx-4 -mt-4 pwa:-mx-6 pwa:-mt-6 mb-6 px-4 py-3 pwa:px-6 pwa:py-4 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm sticky top-0 z-50 transform-gpu">
+        {/* Hamburger Menu (only visible on tablet, 501px - 1023px) */}
+        <div className="hidden pwa:flex items-center">
+          <Sheet>
+            <SheetTrigger render={<button className="p-2 -ml-2 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none" />}>
+              <Menu className="w-6 h-6 text-[#1e293b]" />
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0 bg-[#064eb7] border-white/[0.06] text-white">
+              <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+              <MobileSidebar />
+            </SheetContent>
+          </Sheet>
         </div>
 
-        <button className="relative p-2 rounded-full hover:bg-slate-200 transition-colors flex-shrink-0">
+        {/* Title for mobile inline with header */}
+        <div className="flex flex-col flex-1 min-w-0 pr-4">
+          <h1 className="text-[18px] pwa:text-[20px] font-bold text-[#0f172a] tracking-tight leading-none">Laporan Bullying</h1>
+          <p className="text-[11px] font-desc text-slate-500 truncate mt-0.5">
+            Kelola, tinjau, dan tindak lanjuti laporan kejadian bullying secara terstruktur.
+          </p>
+        </div>
+
+        <button className="relative p-2 rounded-full hover:bg-slate-100 transition-colors flex-shrink-0">
           <Bell className="w-6 h-6 text-[#1e293b]" />
           {unreadCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f4f7fb]">
+            <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -277,26 +329,31 @@ function LaporanContent() {
         <div className="hidden lg:block h-10" />
 
         {/* Filter Bar */}
-        <div className="flex flex-col pwa:flex-row gap-2.5 pwa:gap-4 mb-6">
+        <div className="flex flex-col gap-3 pwa:flex-row pwa:gap-4 mb-6">
+          {/* Search Bar — pill shape on mobile, standard on tablet+ */}
           <div className="relative flex-1">
-            <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+            <Search className="w-[18px] h-[18px] pwa:w-5 pwa:h-5 text-slate-400 absolute left-3.5 pwa:left-4 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="Cari nama, lokasi, atau kata kunci..."
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] pwa:text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-400 shadow-sm"
+              className="w-full pl-10 pwa:pl-10 pr-4 py-2.5 pwa:py-2.5 bg-white rounded-full pwa:rounded-xl border border-slate-200/60 pwa:border-slate-200 text-[13px] pwa:text-sm outline-none focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15 pwa:focus:border-blue-500 pwa:focus:ring-1 pwa:focus:ring-blue-500 transition-all placeholder:text-slate-400 pwa:shadow-sm"
             />
           </div>
-          <div className="flex overflow-x-auto hide-scrollbar gap-2 pb-1 pwa:pb-0 pwa:items-center">
+          {/* Filter Chips — horizontal scroll chips on mobile, dropdown on tablet+ */}
+          <div className="flex overflow-x-auto hide-scrollbar gap-2 pb-0.5 pwa:pb-0 pwa:items-center -mx-1 px-1 pwa:mx-0 pwa:px-0">
+            {/* 1. Date Filter: Always visible on mobile and desktop */}
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
               <PopoverTrigger className={cn(
-                "flex shrink-0 items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors",
-                !date && "text-slate-500"
+                "flex shrink-0 items-center gap-1.5 px-3.5 py-[7px] pwa:px-4 pwa:py-2.5 rounded-full pwa:rounded-xl text-[12px] pwa:text-sm font-semibold pwa:font-medium whitespace-nowrap transition-all",
+                date
+                  ? "bg-blue-50 text-[#064eb7] border border-blue-200 pwa:bg-white pwa:text-slate-700 pwa:border-slate-200 pwa:shadow-sm"
+                  : "bg-white text-slate-600 border border-slate-200/60 pwa:bg-white pwa:text-slate-500 pwa:border-slate-200 pwa:shadow-sm"
               )}>
-                <Calendar className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
+                <Calendar className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" />
                 {date ? format(date, "d MMM yyyy", { locale: idLocale }) : <span>Tanggal</span>}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
+                <ChevronDown className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 opacity-50" />
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0 bg-white border border-slate-200 shadow-lg rounded-xl text-slate-800" align="start">
                 <div className="[&_[data-selected-single=true]]:!bg-[#1b64f2] [&_[data-selected-single=true]]:!text-white [&_.bg-muted]:!bg-slate-100 [&_.text-muted-foreground]:!text-slate-500 [&_.hover\:bg-accent]:hover:!bg-slate-50">
@@ -312,74 +369,224 @@ function LaporanContent() {
               </PopoverContent>
             </Popover>
 
-            <Popover open={isLokasiOpen} onOpenChange={setIsLokasiOpen}>
-              <PopoverTrigger className="flex shrink-0 items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <MapPin className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {lokasiOptions.find((option) => option.value === selectedLokasi)?.label ?? "Lokasi"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {lokasiOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedLokasi(option.value); setIsLokasiOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedLokasi === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedLokasi === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+            {/* 2. Unified Filter Button (Mobile Only) */}
+            <div className="pwa:hidden">
+              <Sheet open={isMobileFilterOpen} onOpenChange={setIsMobileFilterOpen}>
+                <SheetTrigger className={cn(
+                  "flex shrink-0 items-center gap-1.5 px-3.5 py-[7px] rounded-full text-[12px] font-semibold whitespace-nowrap transition-all",
+                  (selectedLokasi !== "all" || selectedStatus !== "all" || selectedKategori !== "all")
+                    ? "bg-blue-50 text-[#064eb7] border border-blue-200"
+                    : "bg-white text-slate-600 border border-slate-200/60"
+                )}>
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  Filter
+                  <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+                </SheetTrigger>
+                <SheetContent side="bottom" showCloseButton={false} className="rounded-t-[20px] px-0 pb-0 pt-0 max-h-[85vh] flex flex-col bg-white"
+                  onPointerDown={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    el.dataset.swipeY = String(e.clientY);
+                  }}
+                  onPointerUp={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    const startY = Number(el.dataset.swipeY || 0);
+                    if (startY && e.clientY - startY > 60) setIsMobileFilterOpen(false);
+                    el.dataset.swipeY = "";
+                  }}
+                >
+                  {/* Handle bar — swipe area */}
+                  <div className="pt-3 pb-2 cursor-grab">
+                    <div className="w-9 h-[3px] bg-slate-300 rounded-full mx-auto" />
+                  </div>
 
-            <Popover open={isStatusOpen} onOpenChange={setIsStatusOpen}>
-              <PopoverTrigger className="flex shrink-0 items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <ShieldCheck className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label ?? "Status"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {STATUS_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedStatus(option.value); setIsStatusOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedStatus === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedStatus === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-5 pb-3">
+                    <SheetTitle className="text-[15px] font-bold text-[#0f172a]">Filter</SheetTitle>
+                    <SheetClose className="p-1.5 -mr-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                      <X className="w-5 h-5" />
+                    </SheetClose>
+                  </div>
 
-            <Popover open={isKategoriOpen} onOpenChange={setIsKategoriOpen}>
-              <PopoverTrigger className="flex shrink-0 items-center gap-1.5 pwa:gap-2 px-3 pwa:px-4 py-2 pwa:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl text-sm font-medium text-slate-700 whitespace-nowrap hover:bg-slate-50 transition-colors">
-                <Tag className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                {KATEGORI_OPTIONS.find((option) => option.value === selectedKategori)?.label ?? "Kategori"}
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </PopoverTrigger>
-              <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                {KATEGORI_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => { setSelectedKategori(option.value); setIsKategoriOpen(false); }}
-                    className={cn(
-                      "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                      selectedKategori === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                    )}
-                  >
-                    {option.label}
-                    {selectedKategori === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+                  {/* Separator + Reset */}
+                  <div className="flex items-center justify-between px-5 py-2.5 border-y border-slate-100 bg-slate-50/50">
+                    <span className="text-[12px] font-medium text-slate-400 uppercase tracking-wider">Pilih filter</span>
+                    <button
+                      onClick={() => {
+                        setSelectedLokasi("all");
+                        setSelectedStatus("all");
+                        setSelectedKategori("all");
+                      }}
+                      className="text-[13px] font-semibold text-[#064eb7] hover:text-[#053e94] transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Modal Body */}
+                  <div className="overflow-y-auto px-5 py-5 space-y-6 flex-1">
+                    {/* Lokasi */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Lokasi</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {lokasiOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedLokasi(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedLokasi === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Status</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {STATUS_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedStatus(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedStatus === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Kategori */}
+                    <div>
+                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Kategori</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {KATEGORI_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setSelectedKategori(opt.value)}
+                            className={cn(
+                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
+                              selectedKategori === opt.value
+                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="px-5 py-4 border-t border-slate-100 bg-white">
+                    <button
+                      onClick={() => setIsMobileFilterOpen(false)}
+                      className="w-full bg-[#064eb7] hover:bg-[#053e94] active:scale-[0.98] text-white rounded-2xl py-3 text-[14px] font-bold shadow-sm transition-all"
+                    >
+                      Terapkan Filter
+                    </button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            {/* 3. Desktop Filter Dropdowns (Tablet+ Only) */}
+            <div className="hidden pwa:flex items-center gap-2">
+              <Popover open={isLokasiOpen} onOpenChange={setIsLokasiOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedLokasi !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <MapPin className="w-4 h-4" />
+                  {lokasiOptions.find((option) => option.value === selectedLokasi)?.label ?? "Lokasi"}
+                  <ChevronDown className="w-4 h-4 opacity-60" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {lokasiOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedLokasi(option.value); setIsLokasiOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedLokasi === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedLokasi === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              <Popover open={isStatusOpen} onOpenChange={setIsStatusOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedStatus !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <ShieldCheck className="w-4 h-4" />
+                  {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label ?? "Status"}
+                  <ChevronDown className="w-4 h-4 opacity-60" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {STATUS_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedStatus(option.value); setIsStatusOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedStatus === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedStatus === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              <Popover open={isKategoriOpen} onOpenChange={setIsKategoriOpen}>
+                <PopoverTrigger className={cn(
+                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
+                  selectedKategori !== "all"
+                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
+                )}>
+                  <Tag className="w-4 h-4" />
+                  {KATEGORI_OPTIONS.find((option) => option.value === selectedKategori)?.label ?? "Kategori"}
+                  <ChevronDown className="w-4 h-4 opacity-60" />
+                </PopoverTrigger>
+                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
+                  {KATEGORI_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setSelectedKategori(option.value); setIsKategoriOpen(false); }}
+                      className={cn(
+                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
+                        selectedKategori === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      {option.label}
+                      {selectedKategori === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
         </div>
 
@@ -408,7 +615,13 @@ function LaporanContent() {
                 ) : isLoading ? (
                   <div className="p-4 text-sm text-slate-500 font-medium">Memuat laporan kejadian...</div>
                 ) : visibleLogs.length === 0 ? (
-                  <div className="p-4 text-sm text-slate-500 font-medium">Belum ada laporan yang sesuai filter.</div>
+                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                    <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-full flex items-center justify-center mb-4">
+                      <SearchX className="w-7 h-7 text-slate-400" />
+                    </div>
+                    <h3 className="text-[14px] pwa:text-[15px] font-bold text-[#1e293b] mb-1.5">Tidak ada laporan</h3>
+                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[280px]">Belum ada laporan kejadian yang sesuai dengan filter yang dipilih.</p>
+                  </div>
                 ) : (                  visibleLogs.map((log, index) => {
                     const isSelected = selectedLog?.id === log.id;
                     const statusMeta = getStatusMeta(log.status);
@@ -516,6 +729,53 @@ function LaporanContent() {
                       {selectedLog.terkaitRekaman}
                     </button>
 
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[12px] pwa:text-[13px] font-bold text-[#1e293b]">Bukti Clip</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Potongan 30 detik sebelum dan sesudah kejadian.</p>
+                        </div>
+                        {selectedEvidenceClip && (
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${getClipStatusMeta(selectedEvidenceClip.status).badge}`}>
+                            {getClipStatusMeta(selectedEvidenceClip.status).label}
+                          </span>
+                        )}
+                      </div>
+
+                      {selectedRecordingUnavailable ? (
+                        <div className="mt-3 rounded-lg border border-red-100 bg-white p-3 text-[11px] font-medium leading-relaxed text-red-700">
+                          Rekaman terkait tidak tersedia dari NVR/DVR, jadi clip bukti belum bisa dibuat dari waktu ini.
+                        </div>
+                      ) : isSelectedEvidenceLoading ? (
+                        <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-[11px] font-medium text-slate-500">
+                          Memuat clip bukti...
+                        </div>
+                      ) : selectedEvidenceClipError ? (
+                        <div className="mt-3 rounded-lg border border-red-100 bg-white p-3 text-[11px] font-medium leading-relaxed text-red-700">
+                          {selectedEvidenceClipError}
+                        </div>
+                      ) : selectedEvidenceClip ? (
+                        <div className="mt-3 grid gap-2 text-[11px] pwa:text-[12px]">
+                          <div className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 border border-slate-100">
+                            <span className="font-medium text-slate-500">ID Clip</span>
+                            <span className="font-bold text-[#1e293b] truncate">{selectedEvidenceClip.id}</span>
+                          </div>
+                          <div className="rounded-lg bg-white px-3 py-2 border border-slate-100">
+                            <p className="font-medium text-slate-500">Rentang Bukti</p>
+                            <p className="font-bold text-[#1e293b] mt-1">{formatClipRange(selectedEvidenceClip.startTime, selectedEvidenceClip.endTime)} WIB</p>
+                          </div>
+                          <div className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 border border-slate-100">
+                            <span className="font-medium text-slate-500">Sumber</span>
+                            <span className="font-bold text-[#1e293b] truncate">{getEvidenceReasonLabel(selectedEvidenceClip.reason)}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3 text-[11px] font-medium leading-relaxed text-slate-600">
+                          Belum ada clip bukti permanen untuk laporan ini. Klik aktivitas di Live Camera atau potong dari halaman Rekaman untuk membuatnya.
+                        </div>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2.5 text-[11px] pwa:text-[12px]">
                       <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
                         <p className="text-slate-500 font-medium">Kategori</p>
@@ -583,8 +843,12 @@ function LaporanContent() {
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500 font-medium">
-                    Pilih laporan untuk melihat detail, bukti, dan timeline penanganan.
+                  <div className="flex-1 flex flex-col items-center justify-center py-16 px-4 text-center">
+                    <div className="w-20 h-20 bg-slate-50 border border-slate-100 rounded-full flex items-center justify-center mb-5">
+                      <FileText className="w-9 h-9 text-slate-400" />
+                    </div>
+                    <h3 className="text-[15px] pwa:text-[16px] font-bold text-[#1e293b] mb-2">Pilih Laporan</h3>
+                    <p className="text-[13px] pwa:text-[14px] text-slate-500 font-medium max-w-[280px] leading-relaxed">Pilih salah satu laporan di daftar sebelah kiri untuk melihat detail kejadian, bukti rekaman, dan timeline penanganan.</p>
                   </div>
                 )}
               </div>
@@ -634,6 +898,49 @@ function getStatusLabel(status: LogStatus) {
   }
 }
 
+function getClipStatusMeta(status: EvidenceClipResponse["status"]) {
+  switch (status) {
+    case "ready":
+      return {
+        label: "Siap",
+        badge: "bg-emerald-50 text-emerald-700 border border-emerald-100",
+      };
+    case "processing":
+      return {
+        label: "Diproses",
+        badge: "bg-blue-50 text-blue-700 border border-blue-100",
+      };
+    case "queued":
+      return {
+        label: "Queued",
+        badge: "bg-amber-50 text-amber-700 border border-amber-100",
+      };
+    default:
+      return {
+        label: "Clip",
+        badge: "bg-slate-50 text-slate-600 border border-slate-100",
+      };
+  }
+}
+
+function formatClipRange(startTime: string, endTime: string) {
+  return `${format(new Date(startTime), "HH:mm:ss", { locale: idLocale })} - ${format(new Date(endTime), "HH:mm:ss", { locale: idLocale })}`;
+}
+
+function getEvidenceReasonLabel(reason: string) {
+  switch (reason) {
+    case "activity_incident_quick_clip":
+      return "Aktivitas Live Camera";
+    case "manual_live_view_save":
+      return "Simpan Rekaman Live";
+    case "ai_incident_seed":
+      return "Demo AI Trigger";
+    case "recording_view_export":
+      return "Potong dari Rekaman";
+    default:
+      return "Evidence Clip";
+  }
+}
 function getStatusMeta(status: LogStatus) {
   switch (status) {
     case "dalam-proses":

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,11 +20,31 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+function getSafeNextPath() {
+  if (typeof window === "undefined") return "/live-view";
+
+  const nextPath = new URLSearchParams(window.location.search).get("next");
+
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/live-view";
+  }
+
+  return nextPath;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const authLogin = useAuthStore((s) => s.login);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated) return;
+
+    router.replace(getSafeNextPath());
+  }, [hasHydrated, isAuthenticated, router]);
 
   const {
     register,
@@ -40,7 +60,7 @@ export default function LoginPage() {
     try {
       const res = await login(data);
       authLogin(res.user, res.token);
-      router.push("/live-view");
+      router.replace(getSafeNextPath());
     } catch (err) {
       setError(
         err instanceof Error
@@ -58,7 +78,7 @@ export default function LoginPage() {
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
         className="relative w-full max-w-sm"

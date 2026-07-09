@@ -56,3 +56,10 @@ backend/.env
 *.py[cod]
 *.egg-info/
 backend/*.egg-info/
+
+/frontend/certificates/
+/frontend/dev-https*.log
+# media gateway runtime output
+/media/recordings/*
+!/media/recordings/.gitkeep
+/media/*.log

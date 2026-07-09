@@ -16,8 +16,12 @@ class Settings(BaseSettings):
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://192.168.110.211:3000",
     ]
     media_base_url: str = "http://localhost:8000/media"
+    media_hls_base_url: str = "http://localhost:8888"
+    media_recordings_dir: str = "/recordings"
+    media_record_segment_duration_seconds: int = 10
     secret_key: str = "change-this-development-key"
     access_token_expire_minutes: int = 1440
 

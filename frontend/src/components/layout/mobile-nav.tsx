@@ -23,8 +23,8 @@ export function MobileBottomNav() {
 
   return (
     <div className="pwa:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-50">
-      <nav className="border-t border-slate-100 bg-white rounded-t-[20px] shadow-[0_-4px_20px_-15px_rgba(0,0,0,0.1)] safe-area-bottom overflow-hidden">
-        <div className="flex items-center justify-around h-[68px] px-2">
+      <nav className="border-t border-slate-200/60 bg-white shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.06)] safe-area-bottom pb-safe">
+        <div className="flex items-center justify-around h-[64px] px-2">
           {navItems.map((item) => {
             const isActive =
               pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));
@@ -32,23 +32,29 @@ export function MobileBottomNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 w-full h-full transition-colors",
-                  isActive ? "text-blue-600" : "text-slate-500 hover:text-slate-600"
-                )}
+                className="relative flex flex-col items-center justify-center w-full h-full gap-[4px] pt-1"
               >
-                <item.icon
+                <div
                   className={cn(
-                    "w-[22px] h-[22px]",
-                    isActive ? "text-blue-600" : "text-slate-500"
+                    "flex items-center justify-center w-[48px] h-[32px] rounded-full transition-all duration-200",
+                    isActive ? "bg-blue-50/80" : "bg-transparent"
                   )}
-                  fill={isActive ? "currentColor" : "none"}
-                  strokeWidth={isActive ? 2 : 1.75}
-                />
-                <span className={cn(
-                  "text-[10px]",
-                  isActive ? "font-bold" : "font-medium"
-                )}>
+                >
+                  <item.icon
+                    className={cn(
+                      "w-[22px] h-[22px] transition-colors duration-200",
+                      isActive ? "text-blue-600" : "text-slate-500"
+                    )}
+                    fill="none"
+                    strokeWidth={isActive ? 2.5 : 2}
+                  />
+                </div>
+                <span
+                  className={cn(
+                    "text-[10px] leading-none transition-colors duration-200",
+                    isActive ? "font-semibold text-blue-600" : "font-medium text-slate-500"
+                  )}
+                >
                   {item.label}
                 </span>
               </Link>
