@@ -290,6 +290,8 @@ export default function LiveViewPage() {
     : null;
   const visibleCameraItems = cameraItems;
   const playerIsPlaying = playerCanInteract && isPlaying;
+  const liveTimelineProgressPercent = playerCanInteract ? (playerIsPlaying ? 100 : 45) : 0;
+  const liveTimelineIsAtLiveEdge = liveTimelineProgressPercent === 100;
   const localRecordingIsActive = localRecordingState === "recording";
   const localRecordingCanStart = localWebcamActive && playerCanInteract;
   const liveStatusLabel = getLiveStatusLabel({
@@ -1090,8 +1092,19 @@ export default function LiveViewPage() {
                   {/* Timeline */}
                   <div className="flex-1 flex items-center gap-2 px-1">
                     <div className="h-1 pwa:h-1.5 flex-1 bg-white/20 rounded-full relative cursor-pointer">
-                      <div className="absolute left-0 top-0 bottom-0 w-[45%] rounded-full bg-blue-600"></div>
-                      <div className="absolute left-[45%] top-1/2 -translate-y-1/2 w-2.5 h-2.5 pwa:w-3 pwa:h-3 rounded-full bg-white pwa:bg-blue-600 shadow-md"></div>
+                      <div
+                        className="absolute left-0 top-0 bottom-0 rounded-full bg-blue-600 transition-[width] duration-300 ease-out"
+                        style={{ width: `${liveTimelineProgressPercent}%` }}
+                      />
+                      {playerCanInteract && (
+                        <div
+                          className={cn(
+                            "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 pwa:w-3 pwa:h-3 rounded-full bg-white pwa:bg-blue-600 shadow-md transition-[left,right] duration-300 ease-out",
+                            liveTimelineIsAtLiveEdge ? "right-0" : "-translate-x-1/2"
+                          )}
+                          style={liveTimelineIsAtLiveEdge ? undefined : { left: `${liveTimelineProgressPercent}%` }}
+                        />
+                      )}
                       {selectedTriggerLog && selectedTriggerMarkerPercent !== null && (
                         <div
                           className="absolute top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500 ring-2 ring-white shadow-lg shadow-red-950/40 pwa:h-3.5 pwa:w-3.5"

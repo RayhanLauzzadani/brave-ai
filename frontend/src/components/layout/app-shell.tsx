@@ -62,7 +62,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {pathname !== "/dashboard" &&
           pathname !== "/live-view" &&
           pathname !== "/rekaman" &&
-          pathname !== "/laporan" && <Topbar />}
+          pathname !== "/laporan" &&
+          pathname !== "/settings" && <Topbar />}
         <main className="flex-1 p-4 pwa:p-6 pb-20 lg:pb-6">{children}</main>
       </div>
       <MobileBottomNav />
