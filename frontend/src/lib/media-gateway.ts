@@ -67,6 +67,11 @@ export function buildGatewayWebRtcPublisherUrl(mediaPath: string) {
   return `${baseUrl}/${encodeMediaPath(mediaPath)}/publish`;
 }
 
+export function buildGatewayWebRtcReaderUrl(mediaPath: string) {
+  const baseUrl = getGatewayWebRtcBaseUrl().replace(/\/+$/g, "");
+  return `${baseUrl}/${encodeMediaPath(mediaPath)}/whep`;
+}
+
 export function buildRaspberryPiInstallCommand(mediaPath: string) {
   const assetBase = getPiAssetBaseUrl();
   const rtspHost = getMediaGatewayHost();

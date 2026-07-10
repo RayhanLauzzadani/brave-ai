@@ -19,6 +19,8 @@ export async function getRecordings(filters?: {
   hasIncident?: boolean;
   status?: string;
   search?: string;
+  offset?: number;
+  limit?: number;
 }): Promise<Recording[]> {
   const params = new URLSearchParams();
   if (filters?.cameraId) params.set("cameraId", filters.cameraId);
@@ -28,6 +30,8 @@ export async function getRecordings(filters?: {
     params.set("status", filters.status);
   }
   if (filters?.search) params.set("search", filters.search);
+  if (typeof filters?.offset === "number") params.set("offset", String(filters.offset));
+  if (typeof filters?.limit === "number") params.set("limit", String(filters.limit));
   if (typeof filters?.hasIncident === "boolean") {
     params.set("hasIncident", String(filters.hasIncident));
   }

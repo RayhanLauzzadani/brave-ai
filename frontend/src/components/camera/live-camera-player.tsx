@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CameraOff, Radio, Video } from "lucide-react";
+import { MediaMtxWebRtcReader } from "@/components/camera/mediamtx-webrtc-reader";
+import { buildGatewayWebRtcReaderUrl, getDevicePublisherMediaPath } from "@/lib/media-gateway";
 import type { Camera } from "@/lib/types";
 
 export type LocalVideoDevice = {
@@ -60,6 +62,9 @@ export function LiveCameraPlayer({
   const streamUrl = camera?.streamUrl?.trim() ?? "";
   const sourceType = camera?.sourceType ?? "mock";
   const mode = getPlaybackMode({ sourceType, streamUrl, isOnline, useLocalWebcam });
+  const webRtcReaderUrl = camera && sourceType === "hls" && camera.mediaPath
+    ? buildGatewayWebRtcReaderUrl(getDevicePublisherMediaPath(camera))
+    : "";
 
   useEffect(() => {
     const video = videoRef.current;
@@ -344,12 +349,21 @@ export function LiveCameraPlayer({
       {showVideo && (
         <video
           ref={videoRef}
-          data-live-media="primary"
+          data-live-media={mode === "local" ? "primary" : "hls-fallback"}
           className="w-full h-full object-cover"
           autoPlay={isPlaying}
           muted={mode === "local" ? true : isMuted}
           playsInline
           preload="metadata"
+        />
+      )}
+
+      {webRtcReaderUrl && mode === "video" && (
+        <MediaMtxWebRtcReader
+          url={webRtcReaderUrl}
+          isPlaying={isPlaying}
+          isMuted={isMuted}
+          onStatusChange={onLocalStatusChange}
         />
       )}
 

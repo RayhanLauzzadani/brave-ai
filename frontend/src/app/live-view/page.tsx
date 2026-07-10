@@ -120,7 +120,7 @@ export default function LiveViewPage() {
       await Promise.allSettled([
         getCameras(),
         getBullyingLogs(),
-        getRecordings({ hasIncident: true }),
+        getRecordings({ cameraId: selectedCameraId ?? undefined, limit: 20 }),
         getAlerts(),
       ]);
 
@@ -421,7 +421,8 @@ export default function LiveViewPage() {
   const handleSnapshot = () => {
     if (!selectedCamera || !playerCanInteract) return;
 
-    const media = videoContainerRef.current?.querySelector("[data-live-media='primary']") as HTMLVideoElement | HTMLImageElement | null;
+    const mediaCandidates = Array.from(videoContainerRef.current?.querySelectorAll("[data-live-media='webrtc'], [data-live-media='hls-fallback'], [data-live-media='primary']") ?? []) as Array<HTMLVideoElement | HTMLImageElement>;
+    const media = mediaCandidates.find((item) => item instanceof HTMLImageElement || item.videoWidth > 0) ?? null;
     const liveCanvas = document.createElement("canvas");
     const liveContext = liveCanvas.getContext("2d");
 

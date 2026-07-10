@@ -7,8 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
 from app.repositories.cameras import list_cameras, to_camera_schema
-from app.repositories.reporting import list_evidence_clips, queue_evidence_clip
+from app.repositories.reporting import (
+    list_bullying_logs,
+    list_evidence_clips,
+    queue_evidence_clip,
+)
 from app.schemas import EvidenceClipRequest, EvidenceClipResponse, Recording, RecordingSegment
+from app.services.recording_catalog import build_recordings, filter_recordings
 from app.services.recording_segments import get_recording_segment_file, list_recording_segments
 
 router = APIRouter()
@@ -17,14 +22,30 @@ DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 @router.get("", response_model=list[Recording])
 async def get_recordings(
+    session: DbSession,
     camera_id: str | None = Query(default=None, alias="cameraId"),
     date_from: datetime | None = Query(default=None, alias="dateFrom"),
     date_to: datetime | None = Query(default=None, alias="dateTo"),
     has_incident: bool | None = Query(default=None, alias="hasIncident"),
     recording_status: str | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
 ) -> list[Recording]:
-    return []
+    recordings = await _list_gateway_recordings(
+        session,
+        camera_id=camera_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return filter_recordings(
+        recordings,
+        has_incident=has_incident,
+        recording_status=recording_status,
+        search=search,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get("/segments", response_model=list[RecordingSegment])
@@ -61,11 +82,15 @@ async def get_recording_segment_media(segment_id: str) -> FileResponse:
 
 
 @router.get("/{recording_id}", response_model=Recording)
-async def get_recording_by_id(recording_id: str) -> Recording:
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Rekaman tidak ditemukan",
-    )
+async def get_recording_by_id(recording_id: str, session: DbSession) -> Recording:
+    recordings = await _list_gateway_recordings(session)
+    recording = next((item for item in recordings if item.id == recording_id), None)
+    if recording is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rekaman tidak ditemukan",
+        )
+    return recording
 
 
 @router.get("/{recording_id}/clips", response_model=list[EvidenceClipResponse])
@@ -83,6 +108,24 @@ async def create_evidence_clip(
     session: DbSession,
 ) -> EvidenceClipResponse:
     return await queue_evidence_clip(session, recording_id, request)
+
+
+async def _list_gateway_recordings(
+    session: AsyncSession,
+    *,
+    camera_id: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[Recording]:
+    cameras = [to_camera_schema(camera) for camera in await list_cameras(session)]
+    segments = list_recording_segments(
+        camera_id=camera_id,
+        date_from=date_from,
+        date_to=date_to,
+        cameras=cameras,
+    )
+    logs = await list_bullying_logs(session)
+    return build_recordings(segments, cameras, logs)
 
 
 def _recording_media_type(suffix: str) -> str:

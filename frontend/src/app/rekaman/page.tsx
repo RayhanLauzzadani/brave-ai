@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -19,6 +19,7 @@ import {
   Menu,
   MoreHorizontal,
   MoreVertical,
+  Pause,
   Play,
   RefreshCw,
   Search,
@@ -97,6 +98,9 @@ export default function RekamanPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const playbackVideoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaybackPlaying, setIsPlaybackPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
 
   const dateRange = useMemo(() => getSevenDayRange(date ?? new Date()), [date]);
 
@@ -114,6 +118,7 @@ export default function RekamanPage() {
           dateTo: dateRange.to.toISOString(),
           status: selectedStatus,
           search: searchTerm.trim() || undefined,
+          limit: 200,
         }),
       ]);
 
@@ -231,6 +236,76 @@ export default function RekamanPage() {
   }, [visibleRecords]);
 
   const selectedAvailable = selectedRecord?.storageStatus === "available";
+  const availableRanges = useMemo(() => {
+    if (!selectedRecord) return [];
+    const selectedDate = format(toDate(selectedRecord.startTime), "yyyy-MM-dd");
+    return recordsWithImage
+      .filter((record) => (
+        record.cameraId === selectedRecord.cameraId
+        && format(toDate(record.startTime), "yyyy-MM-dd") === selectedDate
+      ))
+      .map((record) => ({
+        id: record.id,
+        startTime: toScrubberTime(record.startTime),
+        endTime: toScrubberTime(record.endTime),
+        label: `${record.cameraName} ${formatRecordTime(record.startTime)}`,
+      }));
+  }, [recordsWithImage, selectedRecord]);
+
+  const selectedPlaybackId = selectedRecord?.id ?? null;
+
+  useEffect(() => {
+    const video = playbackVideoRef.current;
+    if (!video || !selectedPlaybackId) return;
+
+    setIsPlaybackPlaying(false);
+    setPlaybackError("");
+    video.pause();
+    video.currentTime = 0;
+  }, [selectedPlaybackId]);
+
+  const handleTimelineTimeChange = (time: string) => {
+    if (!selectedRecord) return;
+
+    const requestedTime = combineDateAndTime(selectedRecord.startTime, time);
+    const matchingRecord = recordsWithImage.find((record) => {
+      const start = toDate(record.startTime).getTime();
+      const end = toDate(record.endTime).getTime();
+      const requested = requestedTime.getTime();
+      return record.cameraId === selectedRecord.cameraId && requested >= start && requested <= end;
+    });
+
+    setSelectedTime(time);
+    if (matchingRecord && matchingRecord.id !== selectedRecord.id) {
+      setSelectedRecordId(matchingRecord.id);
+      return;
+    }
+
+    const video = playbackVideoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+    const offset = (requestedTime.getTime() - toDate(selectedRecord.startTime).getTime()) / 1000;
+    if (offset >= 0 && offset <= video.duration) {
+      video.currentTime = offset;
+    }
+  };
+
+  const handlePlaybackToggle = async () => {
+    if (!selectedRecord?.playbackUrl || !selectedAvailable) return;
+    const video = playbackVideoRef.current;
+    if (!video) return;
+
+    try {
+      if (video.paused) {
+        await video.play();
+        setIsPlaybackPlaying(true);
+      } else {
+        video.pause();
+        setIsPlaybackPlaying(false);
+      }
+    } catch (error) {
+      setPlaybackError(error instanceof Error ? error.message : "Playback rekaman belum bisa dimulai.");
+    }
+  };
 
   const selectRecord = (record: Recording) => {
     setSelectedRecordId(record.id);
@@ -267,6 +342,23 @@ export default function RekamanPage() {
 
   const handleSnapshot = () => {
     if (!selectedRecord || selectedRecord.storageStatus === "unavailable") return;
+
+    const video = playbackVideoRef.current;
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      const videoCanvas = document.createElement("canvas");
+      videoCanvas.width = video.videoWidth;
+      videoCanvas.height = video.videoHeight;
+      const videoContext = videoCanvas.getContext("2d");
+      if (videoContext) {
+        videoContext.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
+        const link = document.createElement("a");
+        link.href = videoCanvas.toDataURL("image/png");
+        link.download = `recording-snapshot-${selectedRecord.id}-${Date.now()}.png`;
+        link.click();
+        setActionMessage("Snapshot berhasil dibuat dari frame rekaman.");
+        return;
+      }
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = 1280;
@@ -750,22 +842,45 @@ export default function RekamanPage() {
                 {selectedRecord ? (
                   <>
                     <div className="relative w-full aspect-video rounded-xl overflow-hidden mb-5 bg-black">
-                      <img src={selectedRecord.image} alt={selectedRecord.cameraName} className={cn("w-full h-full object-cover opacity-70", !selectedAvailable && "grayscale opacity-40")} />
+                      {selectedRecord.playbackUrl ? (
+                        <video
+                          ref={playbackVideoRef}
+                          src={selectedRecord.playbackUrl}
+                          poster={selectedRecord.image}
+                          className={cn("w-full h-full object-cover", !selectedAvailable && "grayscale opacity-40")}
+                          playsInline
+                          preload="metadata"
+                          onPlay={() => setIsPlaybackPlaying(true)}
+                          onPause={() => setIsPlaybackPlaying(false)}
+                          onLoadedData={() => setPlaybackError("")}
+                          onError={() => setPlaybackError("File rekaman belum bisa diputar. Coba Muat Ulang atau pilih segment lain.")}
+                          onTimeUpdate={(event) => {
+                            const time = new Date(toDate(selectedRecord.startTime).getTime() + event.currentTarget.currentTime * 1000);
+                            setSelectedTime(format(time, "HH:mm"));
+                          }}
+                        />
+                      ) : (
+                        <img src={selectedRecord.image} alt={selectedRecord.cameraName} className={cn("w-full h-full object-cover opacity-70", !selectedAvailable && "grayscale opacity-40")} />
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <button disabled={!selectedAvailable} className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/20 hover:bg-black/80 transition-colors hover:scale-105 disabled:hover:scale-100 disabled:opacity-80">
-                          {selectedAvailable ? <Play className="w-5 h-5 text-white fill-white ml-1" /> : <AlertTriangle className="w-5 h-5 text-white" />}
+                        <button onClick={() => void handlePlaybackToggle()} disabled={!selectedAvailable || !selectedRecord.playbackUrl} className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center border border-white/20 hover:bg-black/80 transition-colors hover:scale-105 disabled:hover:scale-100 disabled:opacity-80">
+                          {selectedAvailable ? (isPlaybackPlaying ? <Pause className="w-5 h-5 text-white fill-white" /> : <Play className="w-5 h-5 text-white fill-white ml-1" />) : <AlertTriangle className="w-5 h-5 text-white" />}
                         </button>
                       </div>
-                      <div className={cn("absolute top-3 left-3 text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-widest flex items-center gap-1.5", selectedAvailable ? "bg-red-500 animate-pulse" : "bg-amber-500")}>
+                      <div className={cn("absolute top-3 left-3 text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-widest flex items-center gap-1.5", selectedAvailable ? "bg-slate-900/80" : "bg-amber-500")}>
                         <div className="w-1.5 h-1.5 bg-white rounded-full" />
-                        {selectedAvailable ? "LIVE RECORDING" : "NVR/DVR ERROR"}
+                        {selectedAvailable ? "REKAMAN" : "NVR/DVR ERROR"}
                       </div>
                       <div className="absolute bottom-2 right-2 bg-black/80 px-2 py-1 rounded flex items-center gap-1 text-[11px] font-bold text-white border border-white/20">
                         {selectedRecord.cameraName} - {selectedTime}
                       </div>
+                      {playbackError && (
+                        <div className="absolute inset-x-3 bottom-10 rounded-lg bg-red-950/85 px-3 py-2 text-center text-[11px] font-medium text-red-50 backdrop-blur-sm">
+                          {playbackError}
+                        </div>
+                      )}
                     </div>
-
                     <div className="mb-6">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-bold text-slate-700">Timeline Hari Ini</span>
@@ -778,7 +893,8 @@ export default function RekamanPage() {
                         <TimelineScrubber
                           markers={incidentMarkers}
                           initialTime={selectedTime}
-                          onTimeChange={(time) => setSelectedTime(time)}
+                          availableRanges={availableRanges}
+                          onTimeChange={handleTimelineTimeChange}
                         />
                       ) : (
                         <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs font-medium text-amber-700 leading-relaxed">
