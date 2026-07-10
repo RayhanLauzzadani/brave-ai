@@ -15,7 +15,9 @@
 		}
 
 		handle_path /webrtc/* {
-			reverse_proxy mediamtx:8889
+			reverse_proxy mediamtx:8889 {
+				header_down Location "^/(.*)$" "/webrtc/$1"
+			}
 		}
 
 		handle_path /playback/* {

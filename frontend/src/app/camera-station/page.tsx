@@ -324,7 +324,7 @@ export default function CameraStationPage() {
                 Publisher Webcam
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {hlsUrl && (
+                {hlsUrl && hlsStatus === "online" && (
                   <a href={hlsUrl} target="_blank" rel="noreferrer" className="flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[11px] font-bold text-slate-200 transition-colors hover:bg-white/10">
                     <Wifi className="h-3.5 w-3.5" />
                     HLS
