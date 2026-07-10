@@ -52,7 +52,8 @@ export function getDevicePublisherMediaPath(camera: Camera, rawInput = "") {
   const cleanedSavedUrlPath = stripMediaGatewayPrefix(savedUrlPath, "hls");
   if (cleanedSavedUrlPath) return cleanedSavedUrlPath;
 
-  return `browser-${slugifyMediaPath(camera.id || camera.name)}`;
+  const cameraKey = slugifyMediaPath(camera.id || camera.name).replace(/^cam-/, "");
+  return `camera-${cameraKey}`;
 }
 
 export function buildGatewayHlsUrl(mediaPath: string | null) {

@@ -86,7 +86,7 @@ export default function CameraStationPage() {
         return data[0]?.id ?? null;
       });
       setStationStatus(data.length > 0 ? "idle" : "error");
-      setMessage(data.length > 0 ? "Pilih kamera station lalu siapkan publisher." : "Belum ada kamera. Buat slot station terlebih dahulu.");
+      setMessage(data.length > 0 ? "Pilih kamera lalu siapkan channel live." : "Belum ada kamera. Buat slot station terlebih dahulu.");
     } catch (error) {
       setStationStatus("error");
       setMessage(error instanceof Error ? error.message : "Kamera belum bisa dimuat.");
@@ -207,7 +207,7 @@ export default function CameraStationPage() {
       setHlsUrl(updated.liveHlsUrl ?? buildGatewayHlsUrl(mediaPath));
       setStationStatus("ready");
       setIframeKey((current) => current + 1);
-      setMessage("Station siap. Aktifkan publisher kamera di panel utama.");
+      setMessage(`Channel ${mediaPath} siap. Izinkan kamera di panel publisher, lalu klik Publish.`);
     } catch (error) {
       setStationStatus("error");
       setMessage(error instanceof Error ? error.message : "Station belum bisa disiapkan.");
@@ -294,7 +294,7 @@ export default function CameraStationPage() {
             </Link>
             <div className="min-w-0">
               <h1 className="truncate text-[22px] font-black tracking-tight pwa:text-[26px]">Camera Station</h1>
-              <p className="truncate text-[12px] font-medium text-slate-400 pwa:text-[13px]">{selectedCamera ? `${selectedCamera.name} · ${selectedCamera.location}` : "Perangkat kamera BRAVE AI"}</p>
+              <p className="truncate text-[12px] font-medium text-slate-400 pwa:text-[13px]">{selectedCamera ? `${selectedCamera.name} - ${selectedCamera.location}` : "Perangkat kamera BRAVE AI"}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -353,8 +353,8 @@ export default function CameraStationPage() {
                   <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-blue-300/20 bg-blue-500/10 text-blue-200">
                     <PlayCircle className="h-8 w-8" />
                   </div>
-                  <p className="text-[15px] font-bold text-slate-100">Station belum disiapkan</p>
-                  <p className="mt-2 text-[12px] font-medium leading-relaxed text-slate-500">Pilih kamera dan simpan path MediaMTX untuk membuka publisher.</p>
+                  <p className="text-[15px] font-bold text-slate-100">Channel belum disiapkan</p>
+                  <p className="mt-2 text-[12px] font-medium leading-relaxed text-slate-500">Klik Siapkan Channel. Setelah publisher muncul, izinkan kamera lalu klik Publish.</p>
                 </div>
               )}
             </div>
@@ -389,25 +389,28 @@ export default function CameraStationPage() {
 
             <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-4 shadow-xl backdrop-blur">
               <h2 className="mb-3 text-[15px] font-black">Konfigurasi</h2>
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Path MediaMTX</label>
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Channel MediaMTX</label>
               <input
                 value={mediaPathInput}
                 onChange={(event) => setMediaPathInput(event.target.value)}
                 placeholder="camera-station-1"
                 className="h-11 w-full rounded-2xl border border-white/10 bg-black/20 px-3 text-[13px] font-semibold text-slate-100 outline-none transition focus:border-blue-300/50 focus:ring-4 focus:ring-blue-500/10"
               />
+              <p className="mt-1.5 text-[11px] font-medium leading-relaxed text-slate-500">
+                ID channel dibuat otomatis untuk menghubungkan publisher, Live View, dan rekaman kamera yang sama.
+              </p>
               <div className="mt-3 grid grid-cols-1 gap-2 pwa:grid-cols-3">
                 <button onClick={() => void handlePrepareStation()} disabled={!selectedCamera || !selectedMediaPath || isPreparing} className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 text-[13px] font-black text-white shadow-lg shadow-blue-950/30 transition-colors hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400">
                   {isPreparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Siapkan
+                  Siapkan Channel
                 </button>
                 <button onClick={() => void handleCopyPiCommand()} disabled={!selectedCamera || !selectedMediaPath || isCopyingPiCommand} className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 text-[13px] font-black text-slate-200 transition-colors hover:bg-white/10 disabled:opacity-50">
                   {isCopyingPiCommand ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-                  Copy Pi
+                  Copy untuk Pi
                 </button>
                 <button onClick={() => setIframeKey((current) => current + 1)} disabled={!publisherUrl} className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 text-[13px] font-black text-slate-200 transition-colors hover:bg-white/10 disabled:opacity-50">
                   <RefreshCw className="h-4 w-4" />
-                  Publisher
+                  Muat Publisher
                 </button>
               </div>
               {message && (

@@ -45,9 +45,13 @@ encoder_args=(
 )
 
 if [[ "$VIDEO_CODEC" == "libx264" ]]; then
+  gop_size=$((FRAMERATE * 2))
   encoder_args+=(
     -preset "$PRESET"
     -tune zerolatency
+    -g "$gop_size"
+    -keyint_min "$gop_size"
+    -sc_threshold 0
   )
 fi
 

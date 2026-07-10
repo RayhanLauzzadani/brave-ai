@@ -49,6 +49,11 @@ jobs:
           SECRET_KEY: ci-secret-key
         run: docker compose -f docker-compose.prod.yml config --quiet
 
+      - name: Validate Caddy routing
+        env:
+          APP_HOST: brave-ai.web.id
+        run: docker run --rm -e APP_HOST -v "$PWD/deploy:/etc/caddy:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-latest
@@ -111,7 +116,9 @@ jobs:
             cd '$DEPLOY_DIR'
             test -f .env.production
             docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
+            docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
             docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build --remove-orphans
+            docker compose --env-file .env.production -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
             docker compose --env-file .env.production -f docker-compose.prod.yml exec -T api alembic upgrade head
             docker compose --env-file .env.production -f docker-compose.prod.yml exec -T api python -m app.db.seed
             docker compose --env-file .env.production -f docker-compose.prod.yml ps

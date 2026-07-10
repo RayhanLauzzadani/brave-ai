@@ -10,7 +10,7 @@ services:
     environment:
       APP_HOST: ${APP_HOST:-brave-ai.web.id}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy:/etc/caddy:ro
       - brave_caddy_data:/data
       - brave_caddy_config:/config
     depends_on:

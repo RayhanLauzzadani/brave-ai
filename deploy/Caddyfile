@@ -1,53 +1,29 @@
 (brave_ai_app) {
 	encode gzip zstd
 
-	@api path /api/*
-	reverse_proxy @api api:8000
+	route {
+		@api path /api/*
+		reverse_proxy @api api:8000
 
-	@ws path /ws/*
-	reverse_proxy @ws api:8000
+		@ws path /ws/*
+		reverse_proxy @ws api:8000
 
-	@hls_preflight {
-		path /hls/*
-		method OPTIONS
-	}
-	handle @hls_preflight {
-		header Access-Control-Allow-Origin "*"
-		header Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
-		header Access-Control-Allow-Headers "*"
-		respond 204
-	}
+		handle_path /hls/* {
+			reverse_proxy mediamtx:8888 {
+				header_down Location "^/(.*)$" "/hls/$1"
+			}
+		}
 
-	handle_path /hls/* {
-		header Access-Control-Allow-Origin "*"
-		header Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
-		header Access-Control-Allow-Headers "*"
-		reverse_proxy mediamtx:8888
-	}
+		handle_path /webrtc/* {
+			reverse_proxy mediamtx:8889
+		}
 
-	@webrtc_preflight {
-		path /webrtc/*
-		method OPTIONS
-	}
-	handle @webrtc_preflight {
-		header Access-Control-Allow-Origin "*"
-		header Access-Control-Allow-Methods "GET, HEAD, POST, OPTIONS"
-		header Access-Control-Allow-Headers "*"
-		respond 204
-	}
+		handle_path /playback/* {
+			reverse_proxy mediamtx:9996
+		}
 
-	handle_path /webrtc/* {
-		header Access-Control-Allow-Origin "*"
-		header Access-Control-Allow-Methods "GET, HEAD, POST, OPTIONS"
-		header Access-Control-Allow-Headers "*"
-		reverse_proxy mediamtx:8889
+		reverse_proxy frontend:3000
 	}
-
-	handle_path /playback/* {
-		reverse_proxy mediamtx:9996
-	}
-
-	reverse_proxy frontend:3000
 }
 
 {$APP_HOST} {
