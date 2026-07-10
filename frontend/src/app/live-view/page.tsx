@@ -825,7 +825,7 @@ export default function LiveViewPage() {
   const handleOpenDevicePublisher = async () => {
     if (!selectedCamera) return;
 
-    const mediaPath = getDevicePublisherMediaPath(selectedCamera, streamUrlInput);
+    const mediaPath = getDevicePublisherMediaPath(selectedCamera);
     const publisherWindow = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
     if (publisherWindow) {
       publisherWindow.opener = null;
@@ -868,7 +868,7 @@ export default function LiveViewPage() {
   const handleCopyRaspberryPiCommand = async () => {
     if (!selectedCamera) return;
 
-    const mediaPath = getDevicePublisherMediaPath(selectedCamera, streamUrlInput);
+    const mediaPath = getDevicePublisherMediaPath(selectedCamera);
     setIsCopyingPiCommand(true);
     setSourceStatusState("starting");
     setSourceMessage("Menyiapkan command Raspberry Pi...");

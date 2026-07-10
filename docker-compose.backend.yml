@@ -27,12 +27,14 @@ services:
       - "8554:8554" # RTSP ingest/read
       - "8888:8888" # HLS playback
       - "8889:8889" # WebRTC HTTP endpoint
+      - "8189:8189" # WebRTC ICE TCP fallback
       - "8189:8189/udp" # WebRTC ICE UDP
       - "9996:9996" # MediaMTX playback API
       - "9997:9997" # MediaMTX control API
     volumes:
-      - ./media/mediamtx.yml:/mediamtx.yml:ro
+      - ./media:/media:ro
       - ./media/recordings:/recordings
+    command: /media/mediamtx.yml
 
   postgres:
     image: postgres:16-alpine
