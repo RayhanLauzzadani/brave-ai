@@ -195,13 +195,45 @@ export function LiveCameraPlayer({
         queueStatus({ state: "starting", message: "Menunggu stream HLS aktif..." });
 
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
-          video.src = streamUrl;
-          video.playsInline = true;
-          video.muted = isMuted;
-          video.onloadedmetadata = () => queueStatus({ state: "active", message: "HLS aktif" });
-          video.oncanplay = () => queueStatus({ state: "active", message: "HLS aktif" });
-          video.onerror = () => queueStatus({ state: "starting", message: "Stream HLS belum aktif. Buka Camera Station, izinkan kamera, lalu klik Publish." });
-          if (isPlayingRef.current) await video.play().catch(() => undefined);
+          let nativeRetryCount = 0;
+          let nativeRetryTimeout: number | null = null;
+          const resetNativeRetry = () => {
+            nativeRetryCount = 0;
+            if (nativeRetryTimeout !== null) {
+              window.clearTimeout(nativeRetryTimeout);
+              nativeRetryTimeout = null;
+            }
+          };
+          const loadNativeHls = async () => {
+            video.src = streamUrl;
+            video.playsInline = true;
+            video.muted = isMuted;
+            video.load();
+            if (isPlayingRef.current) await video.play().catch(() => undefined);
+          };
+          const retryNativeHls = () => {
+            if (cancelled || nativeRetryTimeout !== null) return;
+            nativeRetryCount += 1;
+            const retryDelay = Math.min(5000, 1000 + nativeRetryCount * 500);
+            queueStatus({ state: "starting", message: "Menyambungkan ulang stream HLS..." });
+            const retryTimeout = window.setTimeout(() => {
+              nativeRetryTimeout = null;
+              if (!cancelled) void loadNativeHls();
+            }, retryDelay);
+            nativeRetryTimeout = retryTimeout;
+            statusTimeouts.push(retryTimeout);
+          };
+
+          video.onloadedmetadata = () => {
+            resetNativeRetry();
+            queueStatus({ state: "active", message: "HLS aktif" });
+          };
+          video.oncanplay = () => {
+            resetNativeRetry();
+            queueStatus({ state: "active", message: "HLS aktif" });
+          };
+          video.onerror = () => retryNativeHls();
+          await loadNativeHls();
           return;
         }
 
@@ -211,20 +243,28 @@ export function LiveCameraPlayer({
           return;
         }
 
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
         let hlsRetryCount = 0;
-        const retryHlsStream = () => {
-          if (hlsRetryCount >= 20) {
-            queueStatus({ state: "error", message: "Stream HLS belum aktif. Buka Camera Station, izinkan kamera, lalu klik Publish." });
-            return;
+        let hlsRetryTimeout: number | null = null;
+        const resetHlsRetry = () => {
+          hlsRetryCount = 0;
+          if (hlsRetryTimeout !== null) {
+            window.clearTimeout(hlsRetryTimeout);
+            hlsRetryTimeout = null;
           }
+        };
+        const retryHlsStream = () => {
+          if (cancelled || hlsRetryTimeout !== null) return;
 
           hlsRetryCount += 1;
-          queueStatus({ state: "starting", message: "Menunggu stream HLS aktif..." });
+          const retryDelay = Math.min(5000, 1000 + hlsRetryCount * 500);
+          queueStatus({ state: "starting", message: "Menyambungkan ulang stream HLS..." });
           const retryTimeout = window.setTimeout(() => {
+            hlsRetryTimeout = null;
             if (cancelled) return;
-            hls.loadSource(streamUrl);
-          }, 1500);
+            hls.startLoad();
+          }, retryDelay);
+          hlsRetryTimeout = retryTimeout;
           statusTimeouts.push(retryTimeout);
         };
 
@@ -232,10 +272,12 @@ export function LiveCameraPlayer({
         hls.attachMedia(video);
         hls.loadSource(streamUrl);
         hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+          resetHlsRetry();
           queueStatus({ state: "active", message: "HLS aktif" });
           if (isPlayingRef.current) await video.play().catch(() => undefined);
         });
         hls.on(Hls.Events.LEVEL_LOADED, () => {
+          resetHlsRetry();
           queueStatus({ state: "active", message: "HLS aktif" });
         });
         hls.on(Hls.Events.ERROR, (_, data) => {

@@ -75,6 +75,7 @@ export default function LiveViewPage() {
   const localRecordingTimerRef = useRef<number | null>(null);
   const localRecordingObjectUrlRef = useRef<string | null>(null);
   const previousSelectedCameraIdRef = useRef<string | null>(null);
+  const publisherWindowsRef = useRef<Map<string, Window>>(new Map());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
@@ -826,12 +827,25 @@ export default function LiveViewPage() {
     if (!selectedCamera) return;
 
     const mediaPath = getDevicePublisherMediaPath(selectedCamera);
-    const publisherWindow = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
-    if (publisherWindow) {
-      publisherWindow.opener = null;
-      publisherWindow.document.body.innerHTML = '<p style="font-family: system-ui, sans-serif; padding: 24px; color: #0f172a;">Menyiapkan publisher kamera BRAVE AI...</p>';
+    const existingPublisherWindow = publisherWindowsRef.current.get(mediaPath);
+    if (existingPublisherWindow && !existingPublisherWindow.closed) {
+      existingPublisherWindow.focus();
+      setSourceStatusState("starting");
+      setSourceMessage(`Publisher ${mediaPath} sudah terbuka. Aku fokuskan tab yang sama agar stream tidak saling memutus.`);
+      return;
     }
 
+    const publisherTarget = `brave-ai-publisher-${mediaPath.replace(/[^a-z0-9_-]/gi, "-")}`;
+    const publisherWindow = typeof window !== "undefined" ? window.open("about:blank", publisherTarget) : null;
+    if (!publisherWindow) {
+      setSourceStatusState("error");
+      setSourceMessage("Browser memblokir tab Publisher. Izinkan pop-up untuk BRAVE AI lalu coba lagi.");
+      return;
+    }
+
+    publisherWindowsRef.current.set(mediaPath, publisherWindow);
+    publisherWindow.opener = null;
+    publisherWindow.document.body.innerHTML = '<p style="font-family: system-ui, sans-serif; padding: 24px; color: #0f172a;">Menyiapkan publisher kamera BRAVE AI...</p>';
     setIsOpeningPublisher(true);
     setSourceStatusState("starting");
     setSourceMessage("Menyiapkan perangkat ini sebagai kamera live lintas device...");
@@ -856,9 +870,10 @@ export default function LiveViewPage() {
       }
 
       setSourceStatusState("starting");
-      setSourceMessage(`Publisher kamera dibuka untuk ${mediaPath}. Di tab baru, izinkan kamera lalu klik Publish. Device lain akan melihatnya dari Live Camera setelah stream aktif.`);
+      setSourceMessage(`Publisher kamera dibuka untuk ${mediaPath}. Gunakan satu tab/perangkat publisher untuk channel ini agar stream tetap stabil.`);
     } catch (error) {
       publisherWindow?.close();
+      publisherWindowsRef.current.delete(mediaPath);
       setSourceStatusState("error");
       setSourceMessage(error instanceof Error ? error.message : "Publisher kamera belum bisa dibuka.");
     } finally {

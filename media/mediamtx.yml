@@ -24,11 +24,14 @@ rtspTransports: [tcp]
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: ["*"]
-hlsVariant: lowLatency
-hlsSegmentCount: 7
-hlsSegmentDuration: 1s
-hlsPartDuration: 200ms
-hlsAlwaysRemux: false
+# Standard fMP4 HLS is more resilient than Low-Latency HLS when a browser
+# publisher reconnects and is supported by hls.js and modern mobile browsers.
+hlsVariant: fmp4
+hlsSegmentCount: 6
+hlsSegmentDuration: 2s
+# Keep a muxer ready while a camera is live so a new viewer does not have to
+# wait for HLS generation to start.
+hlsAlwaysRemux: true
 
 # WebRTC read/publish foundation for the next phase.
 webrtc: true
@@ -52,6 +55,10 @@ pathDefaults:
 
   # Keep sources active for CCTV-style monitoring and recording.
   sourceOnDemand: false
+
+  # A camera path has one publisher. Reject a second publisher instead of
+  # disconnecting the healthy one and resetting HLS for every viewer.
+  overridePublisher: false
 
 paths:
   # Dynamic paths: camera-1, camera-2, etc.
