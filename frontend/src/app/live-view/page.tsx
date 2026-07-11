@@ -98,6 +98,7 @@ export default function LiveViewPage() {
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceStatusState, setSourceStatusState] = useState<LiveCameraPlayerStatus["state"]>("idle");
   const [isSavingSource, setIsSavingSource] = useState(false);
+  const [isSavingEvidence, setIsSavingEvidence] = useState(false);
   const [isOpeningPublisher, setIsOpeningPublisher] = useState(false);
   const [isCopyingPiCommand, setIsCopyingPiCommand] = useState(false);
   const [isTestingSource, setIsTestingSource] = useState(false);
@@ -157,6 +158,27 @@ export default function LiveViewPage() {
     }, 2000);
     return () => window.clearTimeout(timeout);
   }, [loadLiveData]);
+
+  useEffect(() => {
+    if (!selectedCameraId) return;
+
+    let cancelled = false;
+    const refreshRecordings = async () => {
+      try {
+        const nextRecordings = await getRecordings({ cameraId: selectedCameraId, limit: 20 });
+        if (!cancelled) setRecordings(nextRecordings);
+      } catch {
+        // Keep the existing UI state when the recording index is temporarily unavailable.
+      }
+    };
+
+    void refreshRecordings();
+    const interval = window.setInterval(() => void refreshRecordings(), 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedCameraId]);
 
   const handleAddCamera = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -475,20 +497,29 @@ export default function LiveViewPage() {
   const handleSaveRecording = async () => {
     if (!selectedCamera) return;
     if (!selectedCameraOnline) {
-      window.alert("Kamera sedang offline, rekaman belum bisa disimpan.");
-      return;
-    }
-    if (!activeRecording) {
-      window.alert("Belum ada rekaman insiden untuk kamera ini.");
+      window.alert("Kamera sedang offline, klip bukti belum bisa disimpan.");
       return;
     }
 
-    const { startTime, endTime } = getEvidenceClipWindow(
-      selectedTriggerLog?.timestamp ?? latestLog?.timestamp ?? now.toISOString()
-    );
-
+    setIsSavingEvidence(true);
     try {
-      const clip = await createEvidenceClip(activeRecording.id, {
+      let recording = activeRecording;
+      if (!recording) {
+        const latestRecordings = await getRecordings({ cameraId: selectedCamera.id, limit: 1 });
+        recording = latestRecordings[0];
+        if (recording) setRecordings(latestRecordings);
+      }
+
+      if (!recording) {
+        const mediaPath = getDevicePublisherMediaPath(selectedCamera);
+        window.alert(`Belum ada segment rekaman untuk ${selectedCamera.name}. Pastikan publisher channel ${mediaPath} sedang aktif; segment rekaman muncul setelah gateway selesai menulis file pertama.`);
+        return;
+      }
+
+      const { startTime, endTime } = getEvidenceClipWindow(
+        selectedTriggerLog?.timestamp ?? latestLog?.timestamp ?? now.toISOString()
+      );
+      const clip = await createEvidenceClip(recording.id, {
         cameraId: selectedCamera.id,
         startTime,
         endTime,
@@ -501,11 +532,12 @@ export default function LiveViewPage() {
       window.alert(
         error instanceof Error
           ? error.message
-          : "Rekaman belum bisa disimpan."
+          : "Klip bukti belum bisa disimpan."
       );
+    } finally {
+      setIsSavingEvidence(false);
     }
   };
-
   const clearLocalRecordingTimer = () => {
     if (localRecordingTimerRef.current !== null) {
       window.clearInterval(localRecordingTimerRef.current);
@@ -1086,10 +1118,10 @@ export default function LiveViewPage() {
                       <div className="mt-3 flex gap-2">
                         <button
                           onClick={() => void handleSaveRecording()}
-                          disabled={!selectedCameraOnline || !activeRecording}
+                          disabled={!selectedCameraOnline || isSavingEvidence}
                           className="flex-1 rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-red-600 shadow-sm transition-colors hover:bg-red-50 disabled:bg-white/20 disabled:text-white/45"
                         >
-                          Simpan Bukti
+                          {isSavingEvidence ? "Mencari Rekaman..." : "Simpan Bukti"}
                         </button>
                         <button
                           onClick={() => router.push(`/laporan?logId=${encodeURIComponent(selectedTriggerLog.id)}`)}
@@ -1190,33 +1222,40 @@ export default function LiveViewPage() {
                   </div>
 
                   <div className="mt-5 flex flex-wrap gap-2.5 pt-4 border-t border-slate-200/60">
-                    <button onClick={() => void handleSaveRecording()} disabled={!selectedCameraOnline} className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 pwa:gap-2 px-3 py-2.5 bg-[#fb3b6e] hover:bg-[#eb2a5d] text-white rounded-xl font-bold text-[11px] pwa:text-[12px] transition-colors shadow-sm whitespace-nowrap disabled:bg-slate-300 disabled:text-slate-500">
+                    <button onClick={() => void handleSaveRecording()} disabled={!selectedCameraOnline || isSavingEvidence} className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 pwa:gap-2 px-3 py-2.5 bg-[#fb3b6e] hover:bg-[#eb2a5d] text-white rounded-xl font-bold text-[11px] pwa:text-[12px] transition-colors shadow-sm whitespace-nowrap disabled:bg-slate-300 disabled:text-slate-500">
                       <span className="flex w-3.5 h-3.5 pwa:w-4 pwa:h-4 rounded-full border-[1.5px] border-white items-center justify-center flex-shrink-0">
                         <span className="w-1 h-1 pwa:w-1.5 pwa:h-1.5 bg-white rounded-full"></span>
                       </span>
-                      Simpan Rekaman
+                      {isSavingEvidence ? "Mencari Rekaman..." : "Simpan Klip Bukti"}
                     </button>
                     <button onClick={handleSnapshot} disabled={!playerCanInteract} className="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 pwa:gap-2 px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-bold text-[11px] pwa:text-[12px] transition-colors whitespace-nowrap shadow-sm disabled:bg-slate-100 disabled:text-slate-400">
                       <Camera className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 flex-shrink-0 text-slate-500" />
                       Snapshot
                     </button>
-                    <button
-                      onClick={handleToggleLocalRecording}
-                      disabled={!localRecordingCanStart && !localRecordingIsActive}
-                      className={cn(
-                        "flex-1 min-w-[120px] flex items-center justify-center gap-1.5 pwa:gap-2 px-3 py-2.5 rounded-xl font-bold text-[11px] pwa:text-[12px] transition-colors whitespace-nowrap shadow-sm",
-                        localRecordingIsActive
-                          ? "bg-red-600 text-white hover:bg-red-700"
-                          : "bg-white text-red-600 border border-red-100 hover:bg-red-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200"
-                      )}
-                    >
-                      {localRecordingIsActive ? (
-                        <Square className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 flex-shrink-0 fill-current" />
-                      ) : (
-                        <span className="h-3 w-3 pwa:h-3.5 pwa:w-3.5 rounded-full border-[1.5px] pwa:border-2 border-current flex-shrink-0" />
-                      )}
-                      {localRecordingIsActive ? `Stop ${formatLocalRecordingDuration(localRecordingElapsed)}` : "Mulai Rekam"}
-                    </button>
+                    {(localWebcamActive || localRecordingIsActive) ? (
+                      <button
+                        onClick={handleToggleLocalRecording}
+                        disabled={!localRecordingCanStart && !localRecordingIsActive}
+                        className={cn(
+                          "flex-1 min-w-[120px] flex items-center justify-center gap-1.5 pwa:gap-2 px-3 py-2.5 rounded-xl font-bold text-[11px] pwa:text-[12px] transition-colors whitespace-nowrap shadow-sm",
+                          localRecordingIsActive
+                            ? "bg-red-600 text-white hover:bg-red-700"
+                            : "bg-white text-red-600 border border-red-100 hover:bg-red-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200"
+                        )}
+                      >
+                        {localRecordingIsActive ? (
+                          <Square className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 flex-shrink-0 fill-current" />
+                        ) : (
+                          <span className="h-3 w-3 pwa:h-3.5 pwa:w-3.5 rounded-full border-[1.5px] pwa:border-2 border-current flex-shrink-0" />
+                        )}
+                        {localRecordingIsActive ? `Stop ${formatLocalRecordingDuration(localRecordingElapsed)}` : "Mulai Rekam"}
+                      </button>
+                    ) : (
+                      <div className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-[11px] pwa:text-[12px] font-bold text-emerald-700 whitespace-nowrap">
+                        <ShieldCheck className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" />
+                        Rekam Otomatis Saat Live
+                      </div>
+                    )}
                   </div>
 
                   {localRecordingMessage && (
