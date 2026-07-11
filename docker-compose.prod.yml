@@ -52,11 +52,18 @@ services:
       CORS_ORIGINS: '["https://${APP_HOST:-brave-ai.web.id}","http://${APP_HOST:-brave-ai.web.id}","http://148.230.103.197"]'
       MEDIA_HLS_BASE_URL: https://${APP_HOST:-brave-ai.web.id}/hls
       MEDIA_RECORDINGS_DIR: /recordings
-      MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 10
+      MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 60
+      MEDIA_RECORD_MIN_FILE_SIZE_BYTES: 65536
+      MEDIA_CLIPS_DIR: /clips
+      EVIDENCE_CLIP_MAX_DURATION_SECONDS: 600
+      EVIDENCE_CLIP_FFMPEG_TIMEOUT_SECONDS: 180
+      EVIDENCE_CLIP_SOURCE_WAIT_SECONDS: 120
+      FFMPEG_BINARY: ffmpeg
       SECRET_KEY: ${SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: 1440
     volumes:
       - ./media/recordings:/recordings:ro
+      - ./media/clips:/clips
     depends_on:
       - postgres
       - redis

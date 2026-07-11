@@ -20,7 +20,6 @@ from app.schemas import (
     IncidentEventResult,
     LogStatus,
     TimelineEvent,
-    TimelineStatus,
 )
 
 
@@ -205,19 +204,66 @@ async def list_evidence_clips(
     return [to_evidence_clip_schema(clip) for clip in result.scalars().all()]
 
 
+async def get_evidence_clip(
+    session: AsyncSession,
+    clip_id: str,
+) -> EvidenceClipResponse | None:
+    model = await get_evidence_clip_model(session, clip_id)
+    return to_evidence_clip_schema(model) if model else None
+
+
+async def get_evidence_clip_model(
+    session: AsyncSession,
+    clip_id: str,
+) -> EvidenceClipModel | None:
+    result = await session.execute(
+        select(EvidenceClipModel).where(EvidenceClipModel.id == clip_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_pending_evidence_clip_ids(session: AsyncSession) -> list[str]:
+    result = await session.execute(
+        select(EvidenceClipModel.id).where(
+            EvidenceClipModel.status.in_(("queued", "processing"))
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def update_evidence_clip_status(
+    session: AsyncSession,
+    clip_id: str,
+    status: str,
+    *,
+    clip_url: str | None = None,
+) -> EvidenceClipResponse | None:
+    model = await get_evidence_clip_model(session, clip_id)
+    if not model:
+        return None
+
+    model.status = status
+    if clip_url is not None:
+        model.clip_url = clip_url
+    model.updated_at = utc_now()
+    await session.commit()
+    await session.refresh(model)
+    return to_evidence_clip_schema(model)
+
 async def queue_evidence_clip(
     session: AsyncSession,
     recording_id: str,
     request: EvidenceClipRequest,
 ) -> EvidenceClipResponse:
+    clip_id = f"clip-{uuid4().hex[:8]}"
     clip = EvidenceClipModel(
-        id=f"clip-{uuid4().hex[:8]}",
+        id=clip_id,
         recording_id=recording_id,
         camera_id=request.camera_id,
         start_time=request.start_time,
         end_time=request.end_time,
         reason=request.reason,
-        clip_url=f"/media/clips/{recording_id}-{uuid4().hex[:6]}.mp4",
+        clip_url=f"/api/recordings/clips/{clip_id}/media",
         status="queued",
         created_at=utc_now(),
         updated_at=utc_now(),

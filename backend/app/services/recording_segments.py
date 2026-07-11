@@ -37,13 +37,17 @@ def list_recording_segments(
             if not file_path.is_file() or file_path.suffix.lower() not in MEDIA_RECORDING_SUFFIXES:
                 continue
 
+            file_size = file_path.stat().st_size
+            if file_size < settings.media_record_min_file_size_bytes:
+                continue
+
             raw_segments.append(
                 (
                     mapped_camera_id,
                     target_media_path,
                     file_path,
                     _parse_segment_start(file_path, path_root),
-                    file_path.stat().st_size,
+                    file_size,
                 )
             )
 
@@ -63,6 +67,8 @@ def get_recording_segment_file(segment_id: str) -> Path | None:
 
     for file_path in root.rglob("*"):
         if not file_path.is_file() or file_path.suffix.lower() not in MEDIA_RECORDING_SUFFIXES:
+            continue
+        if file_path.stat().st_size < settings.media_record_min_file_size_bytes:
             continue
 
         resolved = file_path.resolve()

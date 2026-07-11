@@ -117,7 +117,7 @@ class EvidenceClipResponse(BaseModel):
     end_time: datetime = Field(alias="endTime")
     reason: str
     clip_url: str = Field(alias="clipUrl")
-    status: Literal["queued", "processing", "ready"]
+    status: Literal["queued", "processing", "ready", "failed"]
     created_at: datetime = Field(alias="createdAt")
 
     model_config = {"populate_by_name": True}

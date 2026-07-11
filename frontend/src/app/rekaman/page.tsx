@@ -40,6 +40,7 @@ import {
   SheetClose,
 } from "@/components/ui/sheet";
 import { TimelineScrubber } from "@/components/ui/timeline-scrubber";
+import { RecordingPreview } from "@/components/recording/recording-preview";
 import {
   VideoTrimmerModal,
   type VideoTrimExportPayload,
@@ -51,7 +52,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { getCameras } from "@/lib/api/cameras";
 import { getBullyingLogs } from "@/lib/api/bullying-logs";
-import { createEvidenceClip, getRecordings } from "@/lib/api/recordings";
+import {
+  createEvidenceClip,
+  downloadEvidenceClip,
+  getRecordings,
+  waitForEvidenceClip,
+} from "@/lib/api/recordings";
 import type { BullyingLog, Camera as CameraType, Recording, RecordingStatus } from "@/lib/types";
 
 const STATUS_OPTIONS: Array<{ value: "all" | RecordingStatus; label: string }> = [
@@ -61,12 +67,6 @@ const STATUS_OPTIONS: Array<{ value: "all" | RecordingStatus; label: string }> =
   { value: "terkunci", label: "Terkunci" },
 ];
 
-const FALLBACK_THUMBNAILS = [
-  "https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=900&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=900&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1590402494682-cd3fb53b1f70?q=80&w=900&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=900&auto=format&fit=crop",
-];
 
 type TimelineMarker = {
   id: string;
@@ -104,9 +104,11 @@ export default function RekamanPage() {
 
   const dateRange = useMemo(() => getSevenDayRange(date ?? new Date()), [date]);
 
-  const loadRecordingData = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage("");
+  const loadRecordingData = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setErrorMessage("");
+    }
 
     try {
       const [cameraResult, logResult, recordingResult] = await Promise.all([
@@ -135,14 +137,16 @@ export default function RekamanPage() {
         setSelectedTime(toScrubberTime(recordingResult[0].startTime));
       }
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Rekaman belum bisa dimuat. Coba lagi."
-      );
-      setRecords([]);
+      if (!silent) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Rekaman belum bisa dimuat. Coba lagi."
+        );
+        setRecords([]);
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [dateRange.from, dateRange.to, searchTerm, selectedKamera, selectedRecordId, selectedStatus]);
 
@@ -152,6 +156,11 @@ export default function RekamanPage() {
     }, 0);
 
     return () => window.clearTimeout(timeout);
+  }, [loadRecordingData]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => void loadRecordingData(true), 20000);
+    return () => window.clearInterval(interval);
   }, [loadRecordingData]);
 
   const lokasiOptions = useMemo(() => {
@@ -170,19 +179,11 @@ export default function RekamanPage() {
     [cameras]
   );
 
-  const recordsWithImage = useMemo(
-    () =>
-      records.map((record, index) => ({
-        ...record,
-        image: getRecordingImage(record, cameras, index),
-      })),
-    [cameras, records]
-  );
 
   const visibleRecords = useMemo(() => {
-    if (selectedLokasi === "all") return recordsWithImage;
-    return recordsWithImage.filter((record) => record.location === selectedLokasi);
-  }, [recordsWithImage, selectedLokasi]);
+    if (selectedLokasi === "all") return records;
+    return records.filter((record) => record.location === selectedLokasi);
+  }, [records, selectedLokasi]);
 
   const selectedRecord = useMemo(
     () =>
@@ -239,7 +240,7 @@ export default function RekamanPage() {
   const availableRanges = useMemo(() => {
     if (!selectedRecord) return [];
     const selectedDate = format(toDate(selectedRecord.startTime), "yyyy-MM-dd");
-    return recordsWithImage
+    return records
       .filter((record) => (
         record.cameraId === selectedRecord.cameraId
         && format(toDate(record.startTime), "yyyy-MM-dd") === selectedDate
@@ -250,7 +251,7 @@ export default function RekamanPage() {
         endTime: toScrubberTime(record.endTime),
         label: `${record.cameraName} ${formatRecordTime(record.startTime)}`,
       }));
-  }, [recordsWithImage, selectedRecord]);
+  }, [records, selectedRecord]);
 
   const selectedPlaybackId = selectedRecord?.id ?? null;
 
@@ -268,7 +269,7 @@ export default function RekamanPage() {
     if (!selectedRecord) return;
 
     const requestedTime = combineDateAndTime(selectedRecord.startTime, time);
-    const matchingRecord = recordsWithImage.find((record) => {
+    const matchingRecord = records.find((record) => {
       const start = toDate(record.startTime).getTime();
       const end = toDate(record.endTime).getTime();
       const requested = requestedTime.getTime();
@@ -337,7 +338,10 @@ export default function RekamanPage() {
       reason: "recording_view_trim_export",
     });
 
-    setActionMessage(`Clip bukti ${clip.id} masuk antrean export.`);
+    setActionMessage(`Klip ${clip.id} sedang dipotong oleh FFmpeg...`);
+    const readyClip = await waitForEvidenceClip(selectedRecord.id, clip.id);
+    downloadEvidenceClip(readyClip);
+    setActionMessage(`Klip bukti ${readyClip.id} siap dan berhasil diunduh.`);
   };
 
   const handleSnapshot = () => {
@@ -755,7 +759,11 @@ export default function RekamanPage() {
                       }`}
                     >
                       <div className="relative w-[100px] pwa:w-40 aspect-[4/3] pwa:aspect-video rounded-[8px] pwa:rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={record.image} alt={record.cameraName} className={cn("w-full h-full object-cover", record.storageStatus === "unavailable" && "grayscale opacity-60")} />
+                        <RecordingPreview
+                          src={record.playbackUrl}
+                          label={record.cameraName}
+                          unavailable={record.storageStatus === "unavailable"}
+                        />
                         <div className="absolute inset-0 flex items-center justify-center">
                           <div className="w-7 h-7 pwa:w-8 pwa:h-8 rounded-full bg-black/60 flex items-center justify-center">
                             {record.storageStatus === "unavailable" ? <AlertTriangle className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 text-white" /> : <Play className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 text-white fill-white ml-0.5" />}
@@ -846,7 +854,6 @@ export default function RekamanPage() {
                         <video
                           ref={playbackVideoRef}
                           src={selectedRecord.playbackUrl}
-                          poster={selectedRecord.image}
                           className={cn("w-full h-full object-cover", !selectedAvailable && "grayscale opacity-40")}
                           playsInline
                           preload="metadata"
@@ -860,7 +867,12 @@ export default function RekamanPage() {
                           }}
                         />
                       ) : (
-                        <img src={selectedRecord.image} alt={selectedRecord.cameraName} className={cn("w-full h-full object-cover opacity-70", !selectedAvailable && "grayscale opacity-40")} />
+                        <RecordingPreview
+                          src={selectedRecord.playbackUrl}
+                          label={selectedRecord.cameraName}
+                          unavailable={!selectedAvailable}
+                          eager
+                        />
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -1000,7 +1012,12 @@ export default function RekamanPage() {
                   {importantRecords.map((record) => (
                     <div key={`imp-${record.id}`} className="flex-shrink-0 w-[240px] pwa:w-auto flex flex-col gap-3">
                       <div onClick={() => selectRecord(record)} className="relative w-full aspect-video rounded-xl overflow-hidden group cursor-pointer">
-                        <img src={record.image} alt={record.cameraName} className={cn("w-full h-full object-cover transition-transform group-hover:scale-105 duration-300", record.storageStatus === "unavailable" && "grayscale opacity-60")} />
+                        <RecordingPreview
+                          src={record.playbackUrl}
+                          label={record.cameraName}
+                          unavailable={record.storageStatus === "unavailable"}
+                          className="transition-transform duration-300 group-hover:scale-105"
+                        />
                         <div className="absolute inset-0 bg-black/10 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                           <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/40">
                             {record.storageStatus === "unavailable" ? <AlertTriangle className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white fill-white ml-0.5" />}
@@ -1037,7 +1054,9 @@ export default function RekamanPage() {
             cameraName: selectedRecord.cameraName,
             date: formatRecordDate(selectedRecord.startTime),
             time: formatRecordTime(selectedRecord.startTime),
-            thumbnail: selectedRecord.image,
+            playbackUrl: selectedRecord.playbackUrl,
+            duration: selectedRecord.duration,
+            startTime: selectedRecord.startTime,
           }}
           eventTime={selectedTime}
         />
@@ -1055,20 +1074,6 @@ function getSevenDayRange(anchor: Date) {
   return { from, to };
 }
 
-function isPlaceholderThumbnail(url?: string | null) {
-  return !url || url.includes("cam-placeholder");
-}
-
-function getRecordingImage(record: Recording, cameras: CameraType[], index: number) {
-  if (record.thumbnailUrl && !isPlaceholderThumbnail(record.thumbnailUrl)) {
-    return record.thumbnailUrl;
-  }
-  const camera = cameras.find((item) => item.id === record.cameraId);
-  if (camera?.thumbnailUrl && !isPlaceholderThumbnail(camera.thumbnailUrl)) {
-    return camera.thumbnailUrl;
-  }
-  return FALLBACK_THUMBNAILS[index % FALLBACK_THUMBNAILS.length];
-}
 
 function toDate(value: string) {
   const date = new Date(value);

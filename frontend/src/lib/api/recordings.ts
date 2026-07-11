@@ -77,6 +77,53 @@ export async function getEvidenceClips(
   );
 }
 
+export async function waitForEvidenceClip(
+  recordingId: string,
+  clipId: string,
+  options?: { timeoutMs?: number; intervalMs?: number }
+): Promise<EvidenceClipResponse> {
+  const timeoutMs = options?.timeoutMs ?? 240_000;
+  const intervalMs = options?.intervalMs ?? 1_500;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const clips = await getEvidenceClips(recordingId);
+    const clip = clips.find((item) => item.id === clipId);
+
+    if (!clip) {
+      throw new Error("Antrean klip bukti tidak ditemukan.");
+    }
+    if (clip.status === "ready") {
+      return clip;
+    }
+    if (clip.status === "failed") {
+      throw new Error(
+        "FFmpeg gagal membuat klip. Pastikan segmen rekaman tersedia pada rentang waktu tersebut."
+      );
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(
+    "Pembuatan klip masih berlangsung. Cek kembali statusnya di halaman Laporan."
+  );
+}
+
+export function downloadEvidenceClip(clip: EvidenceClipResponse): void {
+  if (clip.status !== "ready") {
+    throw new Error("Klip bukti belum siap diunduh.");
+  }
+
+  const link = document.createElement("a");
+  link.href = clip.clipUrl;
+  link.download = `brave-ai-${clip.id}.mp4`;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 /** Queue an evidence clip export. */
 export async function createEvidenceClip(
   recordingId: string,

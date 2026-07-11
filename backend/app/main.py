@@ -1,16 +1,34 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.api.routes.websocket import router as websocket_router
 from app.core.config import get_settings
+from app.services.evidence_clips import (
+    recover_pending_evidence_clips,
+    shutdown_evidence_clip_tasks,
+)
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    recovery_task = asyncio.create_task(recover_pending_evidence_clips())
+    yield
+    recovery_task.cancel()
+    await asyncio.gather(recovery_task, return_exceptions=True)
+    await shutdown_evidence_clip_tasks()
+
 
 app = FastAPI(
     title=settings.app_name,
     description="Backend API for BRAVE AI anti-bullying CCTV monitoring.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

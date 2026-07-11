@@ -5,19 +5,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.repositories.cameras import list_cameras, to_camera_schema
 from app.repositories.reporting import (
+    get_evidence_clip,
     list_bullying_logs,
     list_evidence_clips,
     queue_evidence_clip,
 )
 from app.schemas import EvidenceClipRequest, EvidenceClipResponse, Recording, RecordingSegment
+from app.services.evidence_clips import get_evidence_clip_file, schedule_evidence_clip
 from app.services.recording_catalog import build_recordings, filter_recordings
 from app.services.recording_segments import get_recording_segment_file, list_recording_segments
 
 router = APIRouter()
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
+settings = get_settings()
 
 
 @router.get("", response_model=list[Recording])
@@ -81,6 +85,23 @@ async def get_recording_segment_media(segment_id: str) -> FileResponse:
     )
 
 
+@router.get("/clips/{clip_id}/media")
+async def get_evidence_clip_media(clip_id: str, session: DbSession) -> FileResponse:
+    clip = await get_evidence_clip(session, clip_id)
+    file_path = get_evidence_clip_file(clip_id)
+    if clip is None or clip.status != "ready" or file_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Klip bukti belum tersedia",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=f"brave-ai-{clip_id}.mp4",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
 @router.get("/{recording_id}", response_model=Recording)
 async def get_recording_by_id(recording_id: str, session: DbSession) -> Recording:
     recordings = await _list_gateway_recordings(session)
@@ -107,7 +128,37 @@ async def create_evidence_clip(
     request: EvidenceClipRequest,
     session: DbSession,
 ) -> EvidenceClipResponse:
-    return await queue_evidence_clip(session, recording_id, request)
+    duration_seconds = (request.end_time - request.start_time).total_seconds()
+    if duration_seconds <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Waktu akhir klip harus setelah waktu awal",
+        )
+    if duration_seconds > settings.evidence_clip_max_duration_seconds:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Durasi klip maksimal "
+                f"{settings.evidence_clip_max_duration_seconds} detik"
+            ),
+        )
+
+    recordings = await _list_gateway_recordings(
+        session,
+        camera_id=request.camera_id,
+        date_from=request.start_time,
+        date_to=request.end_time,
+    )
+    recording = next((item for item in recordings if item.id == recording_id), None)
+    if recording is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rekaman sumber tidak ditemukan pada rentang waktu tersebut",
+        )
+
+    clip = await queue_evidence_clip(session, recording_id, request)
+    schedule_evidence_clip(clip.id)
+    return clip
 
 
 async def _list_gateway_recordings(

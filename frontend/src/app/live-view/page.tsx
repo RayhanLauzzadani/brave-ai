@@ -19,7 +19,13 @@ import { useRouter } from "next/navigation";
 import { getAlerts, subscribeAlerts } from "@/lib/api/alerts";
 import { getBullyingLogs } from "@/lib/api/bullying-logs";
 import { getCameras, updateCameraSource, createCamera, deleteCamera } from "@/lib/api/cameras";
-import { createEvidenceClip, getRecordingById, getRecordings } from "@/lib/api/recordings";
+import {
+  createEvidenceClip,
+  downloadEvidenceClip,
+  getRecordingById,
+  getRecordings,
+  waitForEvidenceClip,
+} from "@/lib/api/recordings";
 import { useAlertStore } from "@/lib/stores/alert-store";
 import { useCameraStore } from "@/lib/stores/camera-store";
 import { useUiStore } from "@/lib/stores/ui-store";
@@ -525,8 +531,10 @@ export default function LiveViewPage() {
         endTime,
         reason: "manual_live_view_save",
       });
+      const readyClip = await waitForEvidenceClip(recording.id, clip.id);
+      downloadEvidenceClip(readyClip);
       window.alert(
-        `Clip bukti ${clip.id} masuk antrean export: 30 detik sebelum dan 30 detik sesudah kejadian.`
+        `Klip bukti ${readyClip.id} berhasil dibuat dan diunduh.`
       );
     } catch (error) {
       window.alert(
@@ -595,7 +603,6 @@ export default function LiveViewPage() {
     const session = {
       cameraId: selectedCamera.id,
       cameraName: selectedCamera.name,
-      recordingId: activeRecording?.id ?? null,
       startTime: startTime.toISOString(),
     };
 
@@ -659,28 +666,9 @@ export default function LiveViewPage() {
       setLocalRecordingElapsed(duration);
       setLocalRecordingResult(result);
 
-      if (!session.recordingId) {
-        setLocalRecordingMessage(`Clip lokal siap diunduh (${formatLocalRecordingDuration(duration)}, ${formatBytes(blob.size)}). Metadata backend belum dikirim karena belum ada recording aktif.`);
-        return;
-      }
-
-      setLocalRecordingMessage(`Clip lokal siap diunduh (${formatLocalRecordingDuration(duration)}, ${formatBytes(blob.size)}). Mengirim metadata ke backend...`);
-      void createEvidenceClip(session.recordingId, {
-        cameraId: session.cameraId,
-        startTime: session.startTime,
-        endTime: endTime.toISOString(),
-        reason: "local_webcam_mvp_recording",
-      })
-        .then((clip) => {
-          setLocalRecordingResult((current) => current?.url === url ? { ...current, backendClipId: clip.id } : current);
-          setLocalRecordingMessage(`Clip lokal siap diunduh. Metadata backend masuk antrean evidence clip ${clip.id}.`);
-        })
-        .catch((error) => {
-          setLocalRecordingMessage(error instanceof Error
-            ? `Clip lokal siap diunduh, tapi metadata backend gagal: ${error.message}`
-            : "Clip lokal siap diunduh, tapi metadata backend gagal dikirim."
-          );
-        });
+      setLocalRecordingMessage(
+        `Clip lokal siap diunduh (${formatLocalRecordingDuration(duration)}, ${formatBytes(blob.size)}). File ini tersimpan di browser dan belum dikirim ke MediaMTX.`
+      );
     };
 
     try {
@@ -747,8 +735,10 @@ export default function LiveViewPage() {
         endTime,
         reason: "activity_incident_quick_clip",
       });
+      const readyClip = await waitForEvidenceClip(recording.id, clip.id);
+      downloadEvidenceClip(readyClip);
       window.alert(
-        `Clip bukti ${clip.id} masuk antrean export: 30 detik sebelum dan 30 detik sesudah kejadian.`
+        `Klip bukti ${readyClip.id} berhasil dibuat dan diunduh.`
       );
     } catch (error) {
       window.alert(

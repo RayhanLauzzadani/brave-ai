@@ -21,7 +21,13 @@ class Settings(BaseSettings):
     media_base_url: str = "http://localhost:8000/media"
     media_hls_base_url: str = "http://localhost:8888"
     media_recordings_dir: str = "/recordings"
-    media_record_segment_duration_seconds: int = 10
+    media_record_segment_duration_seconds: int = 60
+    media_record_min_file_size_bytes: int = 65536
+    media_clips_dir: str = "/clips"
+    evidence_clip_max_duration_seconds: int = 600
+    evidence_clip_ffmpeg_timeout_seconds: int = 180
+    evidence_clip_source_wait_seconds: int = 120
+    ffmpeg_binary: str = "ffmpeg"
     secret_key: str = "change-this-development-key"
     access_token_expire_minutes: int = 1440
 

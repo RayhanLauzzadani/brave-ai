@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Download,
   Eye,
   MapPin,
   Menu,
@@ -208,35 +209,44 @@ function LaporanContent() {
 
   useEffect(() => {
     if (!selectedRecordingId) return;
-    if (evidenceClipsByRecordingId[selectedRecordingId]) return;
 
     let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      setIsLoadingEvidenceClips(true);
+    let refreshTimer: number | null = null;
+
+    const loadClips = async (showLoading: boolean) => {
+      if (showLoading) setIsLoadingEvidenceClips(true);
       setEvidenceClipError("");
 
-      getEvidenceClips(selectedRecordingId)
-        .then((clips) => {
-          if (cancelled) return;
-          setEvidenceClipsByRecordingId((current) => ({
-            ...current,
-            [selectedRecordingId]: clips,
-          }));
-        })
-        .catch((error) => {
-          if (cancelled) return;
-          setEvidenceClipError(error instanceof Error ? error.message : "Clip bukti belum bisa dimuat.");
-        })
-        .finally(() => {
-          if (!cancelled) setIsLoadingEvidenceClips(false);
-        });
-    }, 0);
+      try {
+        const clips = await getEvidenceClips(selectedRecordingId);
+        if (cancelled) return;
+
+        setEvidenceClipsByRecordingId((current) => ({
+          ...current,
+          [selectedRecordingId]: clips,
+        }));
+
+        if (clips.some((clip) => clip.status === "queued" || clip.status === "processing")) {
+          refreshTimer = window.setTimeout(() => void loadClips(false), 2_000);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEvidenceClipError(
+            error instanceof Error ? error.message : "Clip bukti belum bisa dimuat."
+          );
+        }
+      } finally {
+        if (!cancelled && showLoading) setIsLoadingEvidenceClips(false);
+      }
+    };
+
+    void loadClips(true);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timeout);
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
     };
-  }, [evidenceClipsByRecordingId, selectedRecordingId]);
+  }, [selectedRecordingId]);
 
   const updateStatus = async (status: LogStatus) => {
     if (!selectedLog) return;
@@ -768,6 +778,16 @@ function LaporanContent() {
                             <span className="font-medium text-slate-500">Sumber</span>
                             <span className="font-bold text-[#1e293b] truncate">{getEvidenceReasonLabel(selectedEvidenceClip.reason)}</span>
                           </div>
+                          {selectedEvidenceClip.status === "ready" && (
+                            <a
+                              href={selectedEvidenceClip.clipUrl}
+                              download={`brave-ai-${selectedEvidenceClip.id}.mp4`}
+                              className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2.5 font-bold text-white transition-colors hover:bg-blue-700"
+                            >
+                              <Download className="h-4 w-4" />
+                              Unduh MP4
+                            </a>
+                          )}
                         </div>
                       ) : (
                         <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3 text-[11px] font-medium leading-relaxed text-slate-600">
@@ -909,6 +929,11 @@ function getClipStatusMeta(status: EvidenceClipResponse["status"]) {
       return {
         label: "Diproses",
         badge: "bg-blue-50 text-blue-700 border border-blue-100",
+      };
+    case "failed":
+      return {
+        label: "Gagal",
+        badge: "bg-red-50 text-red-700 border border-red-100",
       };
     case "queued":
       return {

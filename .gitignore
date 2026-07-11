@@ -62,4 +62,6 @@ backend/*.egg-info/
 # media gateway runtime output
 /media/recordings/*
 !/media/recordings/.gitkeep
+/media/clips/*
+!/media/clips/.gitkeep
 /media/*.log

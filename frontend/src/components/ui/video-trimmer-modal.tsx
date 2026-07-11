@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Pause, Scissors, Download, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +20,9 @@ interface VideoTrimmerModalProps {
     cameraName: string;
     date: string;
     time: string;
-    thumbnail: string;
+    playbackUrl: string | null;
+    duration: number;
+    startTime: string;
   };
   eventTime: string; // HH:MM
 }
@@ -35,14 +37,16 @@ export function VideoTrimmerModal({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
 
-  const baseSeconds = timeToSeconds(eventTime);
-  const totalDuration = 120;
-  const eventOffset = 60;
+  const totalDuration = Math.max(1, Math.round(recordData.duration));
+  const eventOffset = getEventOffset(recordData.startTime, eventTime, totalDuration);
+  const initialTrimStart = Math.max(0, eventOffset - 30);
+  const initialTrimEnd = Math.min(totalDuration, eventOffset + 30);
 
-  const [trimStart, setTrimStart] = useState(30);
-  const [trimEnd, setTrimEnd] = useState(90);
-  const [currentTime, setCurrentTime] = useState(30);
+  const [trimStart, setTrimStart] = useState(initialTrimStart);
+  const [trimEnd, setTrimEnd] = useState(initialTrimEnd);
+  const [currentTime, setCurrentTime] = useState(initialTrimStart);
 
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
@@ -52,20 +56,14 @@ export function VideoTrimmerModal({
     "start" | "end" | "scrubber" | null
   >(null);
 
-  function timeToSeconds(timeStr: string) {
-    const [hours = 0, minutes = 0] = timeStr.split(":").map(Number);
-    return hours * 3600 + minutes * 60;
-  }
-
-  function getAbsoluteTimeStr(relativeSecs: number) {
-    const absoluteSecs = Math.max(0, baseSeconds - eventOffset + relativeSecs);
-    const h = Math.floor(absoluteSecs / 3600);
-    const m = Math.floor((absoluteSecs % 3600) / 60);
-    const s = Math.floor(absoluteSecs % 60);
-    return `${h.toString().padStart(2, "0")}:${m
+  const getAbsoluteTimeStr = useCallback((relativeSecs: number) => {
+    const value = new Date(recordData.startTime);
+    value.setSeconds(value.getSeconds() + Math.max(0, relativeSecs));
+    return `${value.getHours().toString().padStart(2, "0")}:${value
+      .getMinutes()
       .toString()
-      .padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  }
+      .padStart(2, "0")}:${value.getSeconds().toString().padStart(2, "0")}`;
+  }, [recordData.startTime]);
 
   function parseAbsoluteToRelative(input: string): number | null {
     const parts = input.split(":").map(Number);
@@ -80,7 +78,10 @@ export function VideoTrimmerModal({
       return null;
     }
 
-    const relative = totalSecs - (baseSeconds - eventOffset);
+    const startDate = new Date(recordData.startTime);
+    const startSeconds = startDate.getHours() * 3600 + startDate.getMinutes() * 60 + startDate.getSeconds();
+    let relative = totalSecs - startSeconds;
+    if (relative < -43200) relative += 86400;
     if (relative < 0 || relative > totalDuration) return null;
     return relative;
   }
@@ -91,7 +92,7 @@ export function VideoTrimmerModal({
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [trimStart]);
+  }, [getAbsoluteTimeStr, trimStart]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -99,16 +100,16 @@ export function VideoTrimmerModal({
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [trimEnd]);
+  }, [getAbsoluteTimeStr, trimEnd]);
 
   useEffect(() => {
     let timeout: number | undefined;
 
     if (isOpen) {
       timeout = window.setTimeout(() => {
-        setTrimStart(30);
-        setTrimEnd(90);
-        setCurrentTime(30);
+        setTrimStart(initialTrimStart);
+        setTrimEnd(initialTrimEnd);
+        setCurrentTime(initialTrimStart);
         setIsPlaying(false);
         setIsExporting(false);
         setExportError("");
@@ -119,25 +120,29 @@ export function VideoTrimmerModal({
       if (timeout) window.clearTimeout(timeout);
       document.body.style.overflow = "";
     };
-  }, [isOpen]);
+  }, [initialTrimEnd, initialTrimStart, isOpen]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= trimEnd) {
-            setIsPlaying(false);
-            return trimStart;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, trimEnd, trimStart]);
+    const video = previewVideoRef.current;
+    if (!video || !recordData.playbackUrl) return;
 
-  const handlePointerMove = (clientX: number) => {
+    if (!isPlaying) {
+      video.pause();
+      return;
+    }
+
+    if (video.currentTime < trimStart || video.currentTime >= trimEnd) {
+      video.currentTime = trimStart;
+    }
+    void video.play().catch(() => setIsPlaying(false));
+  }, [isPlaying, recordData.playbackUrl, trimEnd, trimStart]);
+
+  const setPreviewTime = useCallback((value: number) => {
+    const bounded = Math.max(0, Math.min(value, totalDuration));
+    setCurrentTime(bounded);
+    if (previewVideoRef.current) previewVideoRef.current.currentTime = bounded;
+  }, [totalDuration]);
+  const handlePointerMove = useCallback((clientX: number) => {
     if (!trackRef.current || !activeHandle) return;
     const rect = trackRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
@@ -147,15 +152,15 @@ export function VideoTrimmerModal({
     if (activeHandle === "start") {
       const nextValue = Math.max(0, Math.min(value, trimEnd - 5));
       setTrimStart(nextValue);
-      if (currentTime < nextValue) setCurrentTime(nextValue);
+      if (currentTime < nextValue) setPreviewTime(nextValue);
     } else if (activeHandle === "end") {
       const nextValue = Math.min(totalDuration, Math.max(value, trimStart + 5));
       setTrimEnd(nextValue);
-      if (currentTime > nextValue) setCurrentTime(nextValue);
+      if (currentTime > nextValue) setPreviewTime(nextValue);
     } else if (activeHandle === "scrubber") {
-      setCurrentTime(Math.max(0, Math.min(value, totalDuration)));
+      setPreviewTime(value);
     }
-  };
+  }, [activeHandle, currentTime, setPreviewTime, totalDuration, trimEnd, trimStart]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -171,13 +176,13 @@ export function VideoTrimmerModal({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [activeHandle, trimStart, trimEnd]);
+  }, [activeHandle, handlePointerMove]);
 
   const handleStartInputCommit = () => {
     const relative = parseAbsoluteToRelative(startInput);
     if (relative !== null && relative < trimEnd - 5) {
       setTrimStart(relative);
-      if (currentTime < relative) setCurrentTime(relative);
+      if (currentTime < relative) setPreviewTime(relative);
     } else {
       setStartInput(getAbsoluteTimeStr(trimStart));
     }
@@ -187,7 +192,7 @@ export function VideoTrimmerModal({
     const relative = parseAbsoluteToRelative(endInput);
     if (relative !== null && relative > trimStart + 5) {
       setTrimEnd(relative);
-      if (currentTime > relative) setCurrentTime(relative);
+      if (currentTime > relative) setPreviewTime(relative);
     } else {
       setEndInput(getAbsoluteTimeStr(trimEnd));
     }
@@ -253,17 +258,39 @@ export function VideoTrimmerModal({
         <div className="flex-1 flex flex-col overflow-y-auto px-4 py-4 sm:px-8 sm:py-6 gap-5">
           <div className="flex-1 min-h-0 flex items-center justify-center">
             <div className="relative w-full max-h-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden border border-slate-800/40 shadow-2xl">
-              <img
-                src={recordData.thumbnail}
-                alt="Video Feed"
-                className={cn(
-                  "w-full h-full object-cover transition-opacity duration-300",
-                  isPlaying ? "opacity-100" : "opacity-50"
-                )}
-              />
+              {recordData.playbackUrl ? (
+                <video
+                  ref={previewVideoRef}
+                  src={recordData.playbackUrl}
+                  aria-label={`Rekaman ${recordData.cameraName}`}
+                  className={cn(
+                    "w-full h-full object-cover transition-opacity duration-300",
+                    isPlaying ? "opacity-100" : "opacity-70"
+                  )}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onLoadedMetadata={(event) => {
+                    event.currentTarget.currentTime = initialTrimStart;
+                  }}
+                  onTimeUpdate={(event) => {
+                    const nextTime = Math.min(totalDuration, event.currentTarget.currentTime);
+                    setCurrentTime(nextTime);
+                    if (nextTime >= trimEnd) {
+                      event.currentTarget.pause();
+                      setIsPlaying(false);
+                    }
+                  }}
+                  onEnded={() => setIsPlaying(false)}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-slate-900 text-sm font-semibold text-slate-400">
+                  Video rekaman tidak tersedia
+                </div>
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20 pointer-events-none" />
 
-              {!isPlaying && (
+              {!isPlaying && recordData.playbackUrl && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <button
                     type="button"
@@ -400,7 +427,8 @@ export function VideoTrimmerModal({
                 <button
                   type="button"
                   onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded-full transition-colors text-white flex-shrink-0 border border-slate-700"
+                  disabled={!recordData.playbackUrl}
+                  className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded-full transition-colors text-white flex-shrink-0 border border-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isPlaying ? (
                     <Pause className="w-4 h-4" />
@@ -443,4 +471,18 @@ export function VideoTrimmerModal({
       </div>
     </div>
   );
+}
+
+function getEventOffset(startTime: string, eventTime: string, duration: number) {
+  const start = new Date(startTime);
+  const [hours, minutes] = eventTime.split(":").map(Number);
+  if (Number.isNaN(start.getTime()) || !Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return Math.floor(duration / 2);
+  }
+
+  const event = new Date(start);
+  event.setHours(hours, minutes, 0, 0);
+  let offset = Math.round((event.getTime() - start.getTime()) / 1000);
+  if (offset < -43200) offset += 86400;
+  return Math.max(0, Math.min(duration, offset));
 }

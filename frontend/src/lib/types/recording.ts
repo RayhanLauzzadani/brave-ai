@@ -38,7 +38,7 @@ export interface EvidenceClipResponse {
   endTime: string;
   reason: string;
   clipUrl: string;
-  status: "queued" | "processing" | "ready";
+  status: "queued" | "processing" | "ready" | "failed";
   createdAt: string;
 }
 export interface RecordingSegment {
