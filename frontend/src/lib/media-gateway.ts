@@ -67,11 +67,60 @@ export function buildGatewayWebRtcPublisherUrl(mediaPath: string) {
   return `${baseUrl}/${encodeMediaPath(mediaPath)}/publish`;
 }
 
+export function buildGatewayWebRtcWhipUrl(mediaPath: string) {
+  const baseUrl = getGatewayWebRtcBaseUrl().replace(/\/+$/g, "");
+  return baseUrl + "/" + encodeMediaPath(mediaPath) + "/whip";
+}
+
 export function buildGatewayWebRtcReaderUrl(mediaPath: string) {
   const baseUrl = getGatewayWebRtcBaseUrl().replace(/\/+$/g, "");
   return `${baseUrl}/${encodeMediaPath(mediaPath)}/whep`;
 }
 
+export type GatewayPlaybackSpan = {
+  start: string;
+  duration: number;
+};
+
+export async function getGatewayPlaybackSpans(
+  mediaPath: string,
+  range?: { startTime?: string; endTime?: string },
+): Promise<GatewayPlaybackSpan[]> {
+  const baseUrl = getGatewayPlaybackBaseUrl().replace(/\/+$/g, "");
+  const params = new URLSearchParams({ path: mediaPath });
+  if (range?.startTime) params.set("start", new Date(range.startTime).toISOString());
+  if (range?.endTime) params.set("end", new Date(range.endTime).toISOString());
+
+  const response = await fetch(baseUrl + "/list?" + params.toString(), {
+    cache: "no-store",
+  });
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new Error("Riwayat tayangan kamera belum dapat dimuat.");
+  }
+
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) return [];
+
+  return payload.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const start = "start" in item && typeof item.start === "string" ? item.start : "";
+    const duration = "duration" in item && typeof item.duration === "number" ? item.duration : 0;
+    if (!start || !Number.isFinite(duration) || duration <= 0) return [];
+    return [{ start, duration }];
+  });
+}
+
+export function buildGatewayPlaybackUrl(mediaPath: string, startTime: string, durationSeconds: number) {
+  const baseUrl = getGatewayPlaybackBaseUrl().replace(/\/+$/g, "");
+  const params = new URLSearchParams({
+    path: mediaPath,
+    start: new Date(startTime).toISOString(),
+    duration: String(Math.max(1, Math.round(durationSeconds))),
+    format: "fmp4",
+  });
+  return baseUrl + "/get?" + params.toString();
+}
 export function buildRaspberryPiInstallCommand(mediaPath: string) {
   const assetBase = getPiAssetBaseUrl();
   const rtspHost = getMediaGatewayHost();
@@ -106,6 +155,22 @@ export function getGatewayHlsBaseUrl() {
   return "http://localhost:8888";
 }
 
+export function getGatewayPlaybackBaseUrl() {
+  if (process.env.NEXT_PUBLIC_MEDIA_PLAYBACK_BASE_URL) {
+    return process.env.NEXT_PUBLIC_MEDIA_PLAYBACK_BASE_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (isLoopbackHost(host)) {
+      return window.location.protocol + "//" + host + ":9996";
+    }
+
+    return window.location.origin + "/playback";
+  }
+
+  return "http://localhost:9996";
+}
 export function getGatewayWebRtcBaseUrl() {
   if (process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL) {
     return process.env.NEXT_PUBLIC_MEDIA_WEBRTC_BASE_URL;

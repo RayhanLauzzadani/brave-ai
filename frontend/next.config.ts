@@ -4,19 +4,21 @@ import withPWAInit, { runtimeCaching } from "@ducanh2912/next-pwa";
 const backendOrigin = process.env.BACKEND_ORIGIN || "http://127.0.0.1:8000";
 const lanHost = process.env.LAN_HOST || "192.168.110.211";
 
-const recordingNetworkOnly = {
+const privateDataNetworkOnly = {
   urlPattern: ({ url }: { url: URL }) => {
     const path = url.pathname;
     return (
-      path.startsWith("/api/recordings") ||
-      path.startsWith("/api/cameras") ||
+      path.startsWith("/api/") ||
       path.startsWith("/media/") ||
+      path.startsWith("/playback/") ||
+      path.startsWith("/hls/") ||
+      path.startsWith("/webrtc/") ||
       /\.(?:m3u8|ts|mp4|webm)$/i.test(path)
     );
   },
   handler: "NetworkOnly" as const,
   options: {
-    cacheName: "recording-playback-network-only",
+    cacheName: "brave-private-data-network-only-v2",
   },
 };
 
@@ -27,14 +29,17 @@ const withPWA = withPWAInit({
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === "development",
   workboxOptions: {
+    cleanupOutdatedCaches: true,
     disableDevLogs: true,
-    runtimeCaching: [recordingNetworkOnly, ...runtimeCaching],
+    runtimeCaching: [privateDataNetworkOnly, ...runtimeCaching],
   },
 });
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost", lanHost],
-  turbopack: {},
+  turbopack: {
+    root: process.cwd(),
+  },
   async rewrites() {
     return [
       {

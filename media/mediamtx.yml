@@ -27,8 +27,10 @@ hlsAllowOrigins: ["*"]
 # Standard fMP4 HLS is more resilient than Low-Latency HLS when a browser
 # publisher reconnects and is supported by hls.js and modern mobile browsers.
 hlsVariant: fmp4
-hlsSegmentCount: 6
-hlsSegmentDuration: 2s
+hlsSegmentCount: 600
+hlsSegmentDuration: 1s
+# Keep the rolling 10-minute DVR window on disk instead of consuming container RAM.
+hlsDirectory: /hls
 # Keep a muxer ready while a camera is live so a new viewer does not have to
 # wait for HLS generation to start.
 hlsAlwaysRemux: true

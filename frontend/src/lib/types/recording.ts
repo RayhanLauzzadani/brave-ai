@@ -21,6 +21,8 @@ export interface Recording {
   status: RecordingStatus;
   storageStatus: RecordingStorageStatus;
   playbackUrl: string | null;
+  availableAt?: string | null;
+  expiresAt?: string | null;
 }
 
 export interface EvidenceClipRequest {

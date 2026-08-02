@@ -56,8 +56,18 @@ export function RecordingPreview({
           )}
           muted
           playsInline
-          preload="auto"
+          preload="metadata"
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            if (Number.isFinite(video.duration) && video.duration > 0) {
+              video.currentTime = Math.min(0.1, video.duration);
+            }
+          }}
           onLoadedData={(event) => {
+            event.currentTarget.pause();
+            setReadySource(src);
+          }}
+          onSeeked={(event) => {
             event.currentTarget.pause();
             setReadySource(src);
           }}

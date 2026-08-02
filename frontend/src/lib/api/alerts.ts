@@ -42,21 +42,41 @@ export function subscribeAlerts(
     return () => undefined;
   }
 
-  const socket = new WebSocket(`${WS_URL}/alerts`);
+  let socket: WebSocket | null = null;
+  let reconnectTimer: number | null = null;
+  let reconnectAttempt = 0;
+  let stopped = false;
 
-  socket.onmessage = (event) => {
-    try {
-      onAlert(JSON.parse(event.data) as Alert);
-    } catch {
-      // Ignore malformed realtime payloads and keep the socket alive.
-    }
+  const connect = () => {
+    if (stopped) return;
+    socket = new WebSocket(`${WS_URL}/alerts`);
+
+    socket.onopen = () => {
+      reconnectAttempt = 0;
+    };
+    socket.onmessage = (event) => {
+      try {
+        onAlert(JSON.parse(event.data) as Alert);
+      } catch {
+        // Ignore malformed realtime payloads and keep the socket alive.
+      }
+    };
+    socket.onerror = (event) => {
+      onError?.(event);
+    };
+    socket.onclose = () => {
+      if (stopped) return;
+      const delay = Math.min(1000 * 2 ** reconnectAttempt, 10_000);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(connect, delay);
+    };
   };
 
-  socket.onerror = (event) => {
-    onError?.(event);
-  };
+  connect();
 
   return () => {
-    socket.close();
+    stopped = true;
+    if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+    socket?.close();
   };
 }

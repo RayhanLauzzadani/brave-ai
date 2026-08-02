@@ -1,57 +1,46 @@
-// ==========================================
-// BRAVE AI - Auth Store (Zustand)
-// ==========================================
-
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 import type { User } from "@/lib/types";
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   hasHydrated: boolean;
-  login: (user: User, token: string) => void;
+  login: (user: User) => void;
+  restoreSession: (user: User | null) => void;
   logout: () => void;
   setLoading: (loading: boolean) => void;
-  setHasHydrated: (hasHydrated: boolean) => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+  hasHydrated: false,
+
+  login: (user) =>
+    set({
+      user,
+      isAuthenticated: true,
+      isLoading: false,
+      hasHydrated: true,
+    }),
+
+  restoreSession: (user) =>
+    set({
+      user,
+      isAuthenticated: Boolean(user),
+      isLoading: false,
+      hasHydrated: true,
+    }),
+
+  logout: () =>
+    set({
       user: null,
-      token: null,
       isAuthenticated: false,
       isLoading: false,
-      hasHydrated: false,
-
-      login: (user, token) =>
-        set({ user, token, isAuthenticated: true, isLoading: false }),
-
-      logout: () =>
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-        }),
-
-      setLoading: (isLoading) => set({ isLoading }),
-      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
+      hasHydrated: true,
     }),
-    {
-      name: "brave-ai-auth",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        user: state.user,
-        token: state.token,
-        isAuthenticated: state.isAuthenticated,
-      }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
-      },
-    }
-  )
-);
+
+  setLoading: (isLoading) => set({ isLoading }),
+}));

@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, Info, MoreVertical, Share2, Smartphone } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  Info,
+  MoreVertical,
+  Share2,
+  Smartphone,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { LogoutButton } from "@/components/auth/logout-button";
+import { unlockNotificationSound } from "@/lib/notification-sound";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { useNotificationPreferencesStore } from "@/lib/stores/notification-preferences-store";
 import { cn } from "@/lib/utils";
 
 type BeforeInstallPromptEvent = Event & {
@@ -35,6 +48,13 @@ const installGuides: Record<InstallGuide, { title: string; helper: string; steps
 };
 
 export default function SettingsPage() {
+  const user = useAuthStore((state) => state.user);
+  const soundEnabled = useNotificationPreferencesStore(
+    (state) => state.soundEnabled,
+  );
+  const setSoundEnabled = useNotificationPreferencesStore(
+    (state) => state.setSoundEnabled,
+  );
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [activeGuide, setActiveGuide] = useState<InstallGuide>("android");
@@ -95,6 +115,14 @@ export default function SettingsPage() {
 
   const guide = installGuides[activeGuide];
   const buttonLabel = isStandalone ? "Sudah Terpasang" : deferredPrompt ? "Install Aplikasi" : "Lihat Panduan Install";
+
+  const toggleSound = async () => {
+    const nextEnabled = !soundEnabled;
+    if (nextEnabled) {
+      await unlockNotificationSound().catch(() => false);
+    }
+    setSoundEnabled(nextEnabled);
+  };
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] -m-4 p-4 pb-24 font-sans text-slate-900 pwa:-m-6 pwa:p-6 pwa:pb-24 lg:pb-6">
@@ -179,6 +207,61 @@ export default function SettingsPage() {
               </ol>
             </div>
           </div>
+        </section>
+
+        <section className="mt-4 rounded-[24px] border border-slate-100 bg-white p-4 shadow-sm pwa:p-5 lg:p-6">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-[14px] font-black text-slate-900">
+                {user?.name ?? "Pengguna BRAVE AI"}
+              </h2>
+              <p className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
+                {user?.role === "viewer" ? "Guru BK" : "Admin Sekolah"} - {user?.email}
+              </p>
+            </div>
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black text-blue-700">
+              {user?.role === "viewer" ? "Viewer" : "Admin"}
+            </span>
+          </div>
+
+          {user?.role === "viewer" && (
+            <button
+              type="button"
+              onClick={() => void toggleSound()}
+              className="mt-4 flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                  {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-black text-slate-900">Suara Notifikasi</span>
+                  <span className="mt-0.5 block text-[10px] font-medium text-slate-500">
+                    Bunyi saat indikasi baru masuk ketika aplikasi terbuka.
+                  </span>
+                </span>
+              </span>
+              <span
+                className={cn(
+                  "relative h-6 w-11 flex-shrink-0 rounded-full transition-colors",
+                  soundEnabled ? "bg-blue-600" : "bg-slate-300",
+                )}
+                aria-hidden="true"
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                    soundEnabled ? "translate-x-[22px]" : "translate-x-0.5",
+                  )}
+                />
+              </span>
+            </button>
+          )}
+
+          <LogoutButton
+            label="Keluar dari Akun"
+            className="mt-4 h-11 w-full rounded-xl border border-red-200 bg-red-50 text-[12px] font-black text-red-700 hover:bg-red-100"
+          />
         </section>
       </div>
     </div>

@@ -10,7 +10,7 @@ import { Shield, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { login } from "@/lib/api/auth";
+import { getUser, login } from "@/lib/api/auth";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
 const loginSchema = z.object({
@@ -19,6 +19,8 @@ const loginSchema = z.object({
 });
 
 type LoginForm = z.infer<typeof loginSchema>;
+
+const showDemoCredentials = process.env.NODE_ENV !== "production";
 
 function getSafeNextPath() {
   if (typeof window === "undefined") return "/live-view";
@@ -35,10 +37,16 @@ function getSafeNextPath() {
 export default function LoginPage() {
   const router = useRouter();
   const authLogin = useAuthStore((s) => s.login);
+  const restoreSession = useAuthStore((s) => s.restoreSession);
   const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (hasHydrated) return;
+    void getUser().then(restoreSession);
+  }, [hasHydrated, restoreSession]);
 
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated) return;
@@ -52,20 +60,20 @@ export default function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "admin@braveai.school", password: "password" },
+    defaultValues: { email: "", password: "" },
   });
 
   async function onSubmit(data: LoginForm) {
     setError("");
     try {
       const res = await login(data);
-      authLogin(res.user, res.token);
+      authLogin(res.user);
       router.replace(getSafeNextPath());
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Email atau password salah. Gunakan password: password"
+          : "Email atau password salah."
       );
     }
   }
@@ -105,7 +113,11 @@ export default function LoginPage() {
           </div>
 
           {/* Form */}
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            onSubmit={handleSubmit(onSubmit)}
+            autoComplete="off"
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <Label htmlFor="email" className="text-slate-300 text-sm">
                 Email
@@ -113,7 +125,8 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@braveai.school"
+                autoComplete="off"
+                placeholder="nama@sekolah.id"
                 className="bg-white/[0.06] border-white/[0.08] text-white placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-blue-500/20"
                 {...register("email")}
               />
@@ -130,13 +143,16 @@ export default function LoginPage() {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="password"
+                  autoComplete="new-password"
+                  placeholder="Masukkan password"
                   className="bg-white/[0.06] border-white/[0.08] text-white placeholder:text-slate-500 pr-10 focus:border-blue-500/50 focus:ring-blue-500/20"
                   {...register("password")}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                  title={showPassword ? "Sembunyikan password" : "Tampilkan password"}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
                 >
                   {showPassword ? (
@@ -179,14 +195,21 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* Hint */}
-          <p className="text-center text-xs text-slate-500">
-            Demo:{" "}
-            <span className="text-slate-400 font-mono">
-              admin@braveai.school
-            </span>{" "}
-            / <span className="text-slate-400 font-mono">password</span>
-          </p>
+          {showDemoCredentials && (
+            <p className="text-center text-xs text-slate-500">
+              Admin:{" "}
+              <span className="text-slate-400 font-mono">
+                admin@braveai.school
+              </span>{" "}
+              / <span className="text-slate-400 font-mono">password</span>
+              <br />
+              Guru BK:{" "}
+              <span className="text-slate-400 font-mono">
+                gurubk@braveai.school
+              </span>{" "}
+              / <span className="text-slate-400 font-mono">password</span>
+            </p>
+          )}
         </div>
       </motion.div>
     </div>

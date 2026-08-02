@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.camera import CameraModel
-from app.schemas import Camera, CameraCreate, CameraSourceType, CameraSourceUpdate, CameraStatus
+from app.schemas import (
+    Camera,
+    CameraCreate,
+    CameraSourceType,
+    CameraSourceUpdate,
+    CameraStatus,
+)
 
 
 def utc_now() -> datetime:
@@ -48,14 +54,21 @@ async def get_camera(session: AsyncSession, camera_id: str) -> CameraModel | Non
 
 async def create_camera(session: AsyncSession, payload: CameraCreate) -> CameraModel:
     now = utc_now()
+    camera_id = f"cam-{uuid4().hex[:6]}"
+    media_path = (
+        f"camera-{camera_id.removeprefix('cam-')}"
+        if payload.source_type == "hls"
+        else None
+    )
+    live_hls_url = _build_hls_url(media_path)
     camera = CameraModel(
-        id=f"cam-{uuid4().hex[:6]}",
+        id=camera_id,
         name=payload.name.strip(),
         location=payload.location.strip(),
         status="offline",
-        stream_url=None,
-        media_path=None,
-        live_hls_url=None,
+        stream_url=live_hls_url,
+        media_path=media_path,
+        live_hls_url=live_hls_url,
         source_type=payload.source_type,
         thumbnail_url="/images/cam-placeholder.svg",
         last_active=now,
@@ -77,6 +90,25 @@ async def delete_camera(session: AsyncSession, camera_id: str) -> bool:
     await session.delete(camera)
     await session.commit()
     return True
+
+
+async def rename_camera(
+    session: AsyncSession,
+    camera_id: str,
+    name: str,
+    location: str | None = None,
+) -> CameraModel | None:
+    camera = await get_camera(session, camera_id)
+    if not camera:
+        return None
+
+    camera.name = name
+    if location is not None:
+        camera.location = location
+    camera.updated_at = utc_now()
+    await session.commit()
+    await session.refresh(camera)
+    return camera
 
 
 async def update_camera_source(

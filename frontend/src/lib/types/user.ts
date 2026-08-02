@@ -2,7 +2,7 @@
 // BRAVE AI — User Types
 // ==========================================
 
-export type UserRole = "admin" | "operator" | "viewer";
+export type UserRole = "admin" | "viewer";
 
 export interface User {
   id: string;
@@ -19,5 +19,4 @@ export interface LoginCredentials {
 
 export interface AuthResponse {
   user: User;
-  token: string;
 }

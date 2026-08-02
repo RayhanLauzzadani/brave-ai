@@ -9,6 +9,7 @@ from app.api.routes.websocket import router as websocket_router
 from app.core.config import get_settings
 from app.services.evidence_clips import (
     recover_pending_evidence_clips,
+    run_evidence_clip_cleanup,
     shutdown_evidence_clip_tasks,
 )
 
@@ -18,9 +19,11 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     recovery_task = asyncio.create_task(recover_pending_evidence_clips())
+    cleanup_task = asyncio.create_task(run_evidence_clip_cleanup())
     yield
     recovery_task.cancel()
-    await asyncio.gather(recovery_task, return_exceptions=True)
+    cleanup_task.cancel()
+    await asyncio.gather(recovery_task, cleanup_task, return_exceptions=True)
     await shutdown_evidence_clip_tasks()
 
 

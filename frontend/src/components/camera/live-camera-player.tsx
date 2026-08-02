@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CameraOff, Radio, Video } from "lucide-react";
 import { MediaMtxWebRtcReader } from "@/components/camera/mediamtx-webrtc-reader";
 import { buildGatewayWebRtcReaderUrl, getDevicePublisherMediaPath } from "@/lib/media-gateway";
+import type { MediaMtxWebRtcReaderStatus } from "@/lib/mediamtx-webrtc";
 import type { Camera } from "@/lib/types";
 
 export type LocalVideoDevice = {
@@ -30,6 +31,27 @@ export type LiveCameraPlayerStatus = {
   deviceLabel?: string;
 };
 
+export type LiveBufferState = {
+  available: boolean;
+  start: number;
+  end: number;
+  current: number;
+  duration: number;
+  behindLive: number;
+  /** Approximate wall-clock time represented by the seekable live edge. */
+  liveEdgeAt: number;
+};
+
+export const EMPTY_LIVE_BUFFER: LiveBufferState = {
+  available: false,
+  start: 0,
+  end: 0,
+  current: 0,
+  duration: 0,
+  behindLive: 0,
+  liveEdgeAt: 0,
+};
+
 type LiveCameraPlayerProps = {
   camera: Camera | undefined;
   fallbackImage: string;
@@ -37,9 +59,11 @@ type LiveCameraPlayerProps = {
   isPlaying: boolean;
   isMuted: boolean;
   useLocalWebcam: boolean;
+  timeshiftBehindSeconds?: number | null;
   localDeviceId?: string;
   onLocalDevicesChange?: (devices: LocalVideoDevice[]) => void;
   onLocalStatusChange?: (status: LiveCameraPlayerStatus) => void;
+  onLiveBufferChange?: (buffer: LiveBufferState) => void;
 };
 
 type PlaybackMode = "mock" | "local" | "video" | "image" | "unsupported" | "offline";
@@ -50,35 +74,79 @@ export function LiveCameraPlayer({
   isPlaying,
   isMuted,
   useLocalWebcam,
+  timeshiftBehindSeconds = null,
   localDeviceId,
   onLocalDevicesChange,
   onLocalStatusChange,
+  onLiveBufferChange,
 }: LiveCameraPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const isPlayingRef = useRef(isPlaying);
+  const baseIsMutedRef = useRef(isMuted);
+  const webRtcActiveRef = useRef(false);
   const [pausedFrameUrl, setPausedFrameUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<LiveCameraPlayerStatus>({ state: "idle", message: "" });
+  const statusRef = useRef<LiveCameraPlayerStatus>({ state: "idle", message: "" });
+  const [isWebRtcActive, setIsWebRtcActive] = useState(false);
   const streamUrl = camera?.streamUrl?.trim() ?? "";
   const sourceType = camera?.sourceType ?? "mock";
   const mode = getPlaybackMode({ sourceType, streamUrl, isOnline, useLocalWebcam });
   const webRtcReaderUrl = camera && sourceType === "hls" && camera.mediaPath
     ? buildGatewayWebRtcReaderUrl(getDevicePublisherMediaPath(camera))
     : "";
+  const isTimeshifted = timeshiftBehindSeconds !== null;
+  const hlsRunsInBackground = Boolean(webRtcReaderUrl) && !isTimeshifted;
+  const baseIsPlaying = hlsRunsInBackground ? true : isPlaying;
+  const baseIsMuted = mode === "local" ? true : hlsRunsInBackground ? true : isMuted;
+  const webRtcIsPlaying = isTimeshifted ? true : isPlaying;
+  const webRtcIsMuted = isTimeshifted ? true : isMuted;
+  const isTimeshiftedRef = useRef(isTimeshifted);
 
   useEffect(() => {
+    isTimeshiftedRef.current = isTimeshifted;
+  }, [isTimeshifted]);
+
+  const handleWebRtcStatusChange = useCallback(
+    (nextStatus: MediaMtxWebRtcReaderStatus) => {
+      const active = nextStatus.state === "active";
+      webRtcActiveRef.current = active;
+      setIsWebRtcActive(active);
+
+      if (active) {
+        onLocalStatusChange?.({
+          state: "active",
+          message: nextStatus.message,
+        });
+        return;
+      }
+
+      if (!isTimeshiftedRef.current) {
+        const fallbackStatus = statusRef.current;
+        onLocalStatusChange?.(
+          fallbackStatus.state === "idle"
+            ? { state: "starting", message: "Menghubungkan kamera..." }
+            : fallbackStatus,
+        );
+      }
+    },
+    [onLocalStatusChange],
+  );
+
+  useEffect(() => {
+    baseIsMutedRef.current = baseIsMuted;
     const video = videoRef.current;
     if (!video) return;
-    video.muted = mode === "local" ? true : isMuted;
-  }, [isMuted, mode]);
+    video.muted = baseIsMuted;
+  }, [baseIsMuted]);
 
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
+    isPlayingRef.current = baseIsPlaying;
     const video = videoRef.current;
     if (!video) return;
 
     const timeout = window.setTimeout(() => {
-      if (isPlaying) {
+      if (baseIsPlaying) {
         setPausedFrameUrl(null);
         void video.play().catch(() => undefined);
         return;
@@ -90,7 +158,7 @@ export function LiveCameraPlayer({
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [isPlaying, mode]);
+  }, [baseIsPlaying, mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,8 +167,11 @@ export function LiveCameraPlayer({
     const queueStatus = (nextStatus: LiveCameraPlayerStatus) => {
       const timeout = window.setTimeout(() => {
         if (cancelled) return;
+        statusRef.current = nextStatus;
         setStatus(nextStatus);
-        onLocalStatusChange?.(nextStatus);
+        if (!webRtcActiveRef.current || isTimeshiftedRef.current) {
+          onLocalStatusChange?.(nextStatus);
+        }
       }, 0);
       statusTimeouts.push(timeout);
     };
@@ -197,9 +268,10 @@ export function LiveCameraPlayer({
       if (!video || !streamUrl) return;
 
       if (isHlsStream(streamUrl, sourceType)) {
-        queueStatus({ state: "starting", message: "Menunggu stream HLS aktif..." });
+        queueStatus({ state: "starting", message: "Menghubungkan kamera..." });
 
-        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        const Hls = (await import("hls.js")).default;
+        if (!Hls.isSupported() && video.canPlayType("application/vnd.apple.mpegurl")) {
           let nativeRetryCount = 0;
           let nativeRetryTimeout: number | null = null;
           const resetNativeRetry = () => {
@@ -212,7 +284,7 @@ export function LiveCameraPlayer({
           const loadNativeHls = async () => {
             video.src = streamUrl;
             video.playsInline = true;
-            video.muted = isMuted;
+            video.muted = baseIsMutedRef.current;
             video.load();
             if (isPlayingRef.current) await video.play().catch(() => undefined);
           };
@@ -220,7 +292,7 @@ export function LiveCameraPlayer({
             if (cancelled || nativeRetryTimeout !== null) return;
             nativeRetryCount += 1;
             const retryDelay = Math.min(5000, 1000 + nativeRetryCount * 500);
-            queueStatus({ state: "starting", message: "Menyambungkan ulang stream HLS..." });
+            queueStatus({ state: "offline", message: "Kamera belum mengirim tayangan. Mencoba kembali..." });
             const retryTimeout = window.setTimeout(() => {
               nativeRetryTimeout = null;
               if (!cancelled) void loadNativeHls();
@@ -231,26 +303,33 @@ export function LiveCameraPlayer({
 
           video.onloadedmetadata = () => {
             resetNativeRetry();
-            queueStatus({ state: "active", message: "HLS aktif" });
+            queueStatus({ state: "active", message: "Tayangan kamera aktif." });
           };
           video.oncanplay = () => {
             resetNativeRetry();
-            queueStatus({ state: "active", message: "HLS aktif" });
+            queueStatus({ state: "active", message: "Tayangan kamera aktif." });
           };
           video.onerror = () => retryNativeHls();
           await loadNativeHls();
           return;
         }
 
-        const Hls = (await import("hls.js")).default;
         if (!Hls.isSupported()) {
-          queueStatus({ state: "unsupported", message: "Browser belum mendukung HLS untuk stream ini." });
+          queueStatus({ state: "unsupported", message: "Tayangan kamera belum didukung pada perangkat ini." });
           return;
         }
 
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 600,
+          maxBufferLength: 60,
+          maxMaxBufferLength: 600,
+          liveSyncDurationCount: 2,
+        });
         let hlsRetryCount = 0;
         let hlsRetryTimeout: number | null = null;
+        let hlsActiveAnnounced = false;
         const resetHlsRetry = () => {
           hlsRetryCount = 0;
           if (hlsRetryTimeout !== null) {
@@ -258,12 +337,19 @@ export function LiveCameraPlayer({
             hlsRetryTimeout = null;
           }
         };
+        const announceHlsActive = () => {
+          resetHlsRetry();
+          if (hlsActiveAnnounced) return;
+          hlsActiveAnnounced = true;
+          queueStatus({ state: "active", message: "Tayangan kamera aktif." });
+        };
         const retryHlsStream = () => {
           if (cancelled || hlsRetryTimeout !== null) return;
 
+          hlsActiveAnnounced = false;
           hlsRetryCount += 1;
           const retryDelay = Math.min(5000, 1000 + hlsRetryCount * 500);
-          queueStatus({ state: "starting", message: "Menyambungkan ulang stream HLS..." });
+          queueStatus({ state: "offline", message: "Kamera belum mengirim tayangan. Mencoba kembali..." });
           const retryTimeout = window.setTimeout(() => {
             hlsRetryTimeout = null;
             if (cancelled) return;
@@ -277,13 +363,11 @@ export function LiveCameraPlayer({
         hls.attachMedia(video);
         hls.loadSource(streamUrl);
         hls.on(Hls.Events.MANIFEST_PARSED, async () => {
-          resetHlsRetry();
-          queueStatus({ state: "active", message: "HLS aktif" });
+          announceHlsActive();
           if (isPlayingRef.current) await video.play().catch(() => undefined);
         });
         hls.on(Hls.Events.LEVEL_LOADED, () => {
-          resetHlsRetry();
-          queueStatus({ state: "active", message: "HLS aktif" });
+          announceHlsActive();
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!data.fatal) return;
@@ -297,7 +381,7 @@ export function LiveCameraPlayer({
       }
       video.src = streamUrl;
       video.playsInline = true;
-      video.muted = isMuted;
+      video.muted = baseIsMutedRef.current;
       if (isPlayingRef.current) await video.play().catch(() => undefined);
       queueStatus({ state: "active", message: "Stream video aktif" });
     }
@@ -311,7 +395,7 @@ export function LiveCameraPlayer({
     } else if (mode === "mock") {
       queueStatus({ state: "preview", message: "Preview kamera" });
     } else if (mode === "offline") {
-      queueStatus({ state: "offline", message: "Kamera offline" });
+      queueStatus({ state: "offline", message: "Kamera belum terhubung." });
     }
 
     return () => {
@@ -326,19 +410,111 @@ export function LiveCameraPlayer({
         video.srcObject = null;
       }
     };
-  }, [isMuted, localDeviceId, mode, onLocalDevicesChange, onLocalStatusChange, sourceType, streamUrl]);
+  }, [localDeviceId, mode, onLocalDevicesChange, onLocalStatusChange, sourceType, streamUrl]);
+
+  const reportLiveBuffer = useCallback(() => {
+    if (!onLiveBufferChange || !isHlsStream(streamUrl, sourceType)) return;
+
+    const video = videoRef.current;
+    if (!video || video.seekable.length === 0) {
+      onLiveBufferChange(EMPTY_LIVE_BUFFER);
+      return;
+    }
+
+    const start = video.seekable.start(0);
+    const end = video.seekable.end(video.seekable.length - 1);
+    const duration = Math.max(0, end - start);
+    const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : end;
+    const current = Math.min(Math.max(currentTime, start), end);
+
+    onLiveBufferChange({
+      available: duration >= 1,
+      start,
+      end,
+      current,
+      duration,
+      behindLive: Math.max(0, end - current),
+      liveEdgeAt: Date.now(),
+    });
+  }, [onLiveBufferChange, sourceType, streamUrl]);
+
+  useEffect(() => {
+    if (!onLiveBufferChange || !isHlsStream(streamUrl, sourceType)) return;
+
+    let frameId = 0;
+    let lastReportAt = 0;
+    const reportAtAnimationFrame = (timestamp: number) => {
+      if (timestamp - lastReportAt >= 80) {
+        lastReportAt = timestamp;
+        reportLiveBuffer();
+      }
+      frameId = window.requestAnimationFrame(reportAtAnimationFrame);
+    };
+
+    frameId = window.requestAnimationFrame(reportAtAnimationFrame);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [onLiveBufferChange, reportLiveBuffer, sourceType, streamUrl]);
+
+  useEffect(() => {
+    onLiveBufferChange?.(EMPTY_LIVE_BUFFER);
+  }, [camera?.id, onLiveBufferChange, streamUrl]);
+
+  useEffect(() => {
+    if (!isHlsStream(streamUrl, sourceType)) return;
+
+    let retryTimeout: number | null = null;
+    let attempts = 0;
+
+    const applyTimeshift = () => {
+      const video = videoRef.current;
+      if (!video || video.seekable.length === 0) {
+        attempts += 1;
+        if (attempts <= 20) {
+          retryTimeout = window.setTimeout(applyTimeshift, 250);
+        }
+        return;
+      }
+
+      const start = video.seekable.start(0);
+      const end = video.seekable.end(video.seekable.length - 1);
+
+      if (timeshiftBehindSeconds === null) {
+        if (end - video.currentTime > 2) {
+          video.currentTime = Math.max(start, end - 0.15);
+        }
+      } else {
+        const target = Math.min(
+          Math.max(end - timeshiftBehindSeconds, start + 0.05),
+          end - 0.15,
+        );
+        if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.25) {
+          video.currentTime = target;
+        }
+      }
+
+      reportLiveBuffer();
+    };
+
+    const initialAttempt = window.setTimeout(applyTimeshift, 0);
+    return () => {
+      window.clearTimeout(initialAttempt);
+      if (retryTimeout !== null) window.clearTimeout(retryTimeout);
+    };
+  }, [reportLiveBuffer, sourceType, streamUrl, timeshiftBehindSeconds]);
 
   const showVideo = mode === "local" || mode === "video";
   const showImageStream = mode === "image" && streamUrl;
   const showFallbackImage = !showVideo && !showImageStream;
-  const showState = shouldShowStateOverlay(mode, status);
+  const showState =
+    shouldShowStateOverlay(mode, status)
+    && !(isWebRtcActive && !isTimeshifted);
 
   return (
     <div className="absolute inset-0 bg-[#1e293b]">
       {showFallbackImage && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f172a] text-slate-500">
           <CameraOff className="mb-3 h-10 w-10 opacity-50" />
-          <p className="text-[13px] font-medium">{isOnline ? "Preview tidak tersedia" : "Kamera Offline"}</p>
+          <p className="text-[13px] font-medium">{isOnline ? "Tayangan belum tersedia" : "Kamera belum terhubung"}</p>
         </div>
       )}
 
@@ -350,24 +526,31 @@ export function LiveCameraPlayer({
         <video
           ref={videoRef}
           data-live-media={mode === "local" ? "primary" : "hls-fallback"}
-          className="w-full h-full object-cover"
-          autoPlay={isPlaying}
-          muted={mode === "local" ? true : isMuted}
+          className="h-full w-full object-cover"
+          autoPlay={baseIsPlaying}
+          muted={baseIsMuted}
           playsInline
-          preload="metadata"
+          preload="auto"
+          onCanPlay={reportLiveBuffer}
+          onDurationChange={reportLiveBuffer}
+          onLoadedMetadata={reportLiveBuffer}
+          onProgress={reportLiveBuffer}
+          onSeeked={reportLiveBuffer}
+          onTimeUpdate={reportLiveBuffer}
         />
       )}
 
       {webRtcReaderUrl && mode === "video" && (
         <MediaMtxWebRtcReader
           url={webRtcReaderUrl}
-          isPlaying={isPlaying}
-          isMuted={isMuted}
-          onStatusChange={onLocalStatusChange}
+          isPlaying={webRtcIsPlaying}
+          isMuted={webRtcIsMuted}
+          isVisible={!isTimeshifted}
+          onStatusChange={handleWebRtcStatusChange}
         />
       )}
 
-      {pausedFrameUrl && !isPlaying && showVideo && (
+      {pausedFrameUrl && !baseIsPlaying && showVideo && (
         <div className="pointer-events-none absolute inset-0 bg-black">
           <img src={pausedFrameUrl} className="h-full w-full object-cover" alt="Paused camera frame" />
           <div className="absolute left-3 top-3 rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold tracking-wide text-white backdrop-blur-sm">
@@ -433,16 +616,16 @@ function isDirectVideo(streamUrl: string) {
 }
 
 function getUnsupportedMessage(sourceType: Camera["sourceType"]) {
-  if (sourceType === "rtsp") return "RTSP perlu media gateway ke HLS/WebRTC";
-  if (sourceType === "nvr") return "NVR/DVR perlu gateway playback";
-  if (sourceType === "webrtc") return "WebRTC perlu signaling server";
-  return "Sumber belum bisa diputar langsung";
+  if (sourceType === "rtsp" || sourceType === "nvr" || sourceType === "webrtc") {
+    return "Kamera ini perlu dikonfigurasi ulang oleh pengawas.";
+  }
+  return "Tayangan kamera belum dapat diputar.";
 }
 
 function shouldShowStateOverlay(mode: PlaybackMode, status: LiveCameraPlayerStatus) {
   if (!status.message) return false;
   if (mode === "offline" || mode === "unsupported") return true;
-  return ["starting", "permission-denied", "busy", "missing", "unsupported", "error", "stopped"].includes(status.state);
+  return ["starting", "permission-denied", "busy", "missing", "unsupported", "offline", "error", "stopped"].includes(status.state);
 }
 
 function getFriendlyWebcamStatus(error: unknown): LiveCameraPlayerStatus {

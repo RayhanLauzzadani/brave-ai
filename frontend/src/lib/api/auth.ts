@@ -1,6 +1,6 @@
 // ==========================================
 // BRAVE AI - Auth API
-// FastAPI-backed authentication for development.
+// FastAPI-backed cookie session authentication.
 // ==========================================
 
 import { AuthResponse, LoginCredentials, User } from "@/lib/types";
@@ -8,7 +8,7 @@ import { apiClient } from "@/lib/api/client";
 
 /**
  * Login with email and password.
- * Demo backend accepts any email with password "password".
+ * The backend sets an HttpOnly session cookie on success.
  */
 export async function login(
   credentials: LoginCredentials

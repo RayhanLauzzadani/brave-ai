@@ -14,7 +14,7 @@ Catatan scope: repo ini tidak mengembangkan model AI. Backend hanya menerima eve
 brave-ai-cctv/
   frontend/                 # Next.js app
   backend/                  # FastAPI app
-  media/                    # MediaMTX config + local recording output
+  media/                    # MediaMTX segments, daily archives, and evidence clips
   docker-compose.backend.yml
   AGENTS.md
 ```
@@ -70,6 +70,12 @@ Catatan: script `npm run dev:https` membuat sertifikat self-signed dengan SAN `l
 
 Secara default frontend memanggil backend lewat same-origin `/api`, lalu Next.js mem-proxy ke FastAPI (`BACKEND_ORIGIN`, default `http://127.0.0.1:8000`). Untuk akses LAN/HTTPS, jangan set `NEXT_PUBLIC_API_BASE_URL` kecuali memang ingin bypass proxy.
 
+## Evaluasi Dataset Gemini
+
+Runner evaluasi offline dan struktur dataset dijelaskan di
+[docs/ai-evaluation/README.md](docs/ai-evaluation/README.md). Dataset video dan
+hasil run tetap lokal dan tidak ikut Git.
+
 ## Menjalankan Backend
 
 ```bash
@@ -123,6 +129,19 @@ http://localhost:8888/camera-1/index.m3u8
 
 Recording segment lokal akan masuk ke `media/recordings/` dan tidak ikut Git.
 
+MediaMTX tetap merekam segmen kecil agar live DVR tidak mudah rusak saat kamera
+terputus. Service `recording-worker` menggabungkan segmen menjadi satu arsip
+per sesi kamera. Sesi ditutup saat kamera berhenti, atau dipotong otomatis setiap
+maksimal 24 jam bila kamera terus menyala. Hasilnya dikompres ke MP4 H.264
+540p/12 FPS, dicatat ke PostgreSQL, dan otomatis dihapus 7 hari setelah siap.
+File final disimpan di `media/archives/` dan tidak ikut Git maupun proses
+`rsync --delete` saat deployment.
+
+Untuk scope MVP lomba, evidence clip juga dibersihkan otomatis setelah 7 hari.
+Raw segment MediaMTX tetap disimpan 7 hari agar peninjauan notifikasi lama tetap
+bisa menggunakan sumber rekaman yang sama. Sebelum demo, jalankan backup manual
+PostgreSQL dan pemeriksaan ruang disk sesuai panduan `deploy/README_VPS.md`.
+
 Setelah service backend/postgres menyala, jalankan migration dan seed user demo:
 
 ```bash
@@ -134,7 +153,12 @@ Demo login:
 
 ```text
 admin@braveai.school / password
+gurubk@braveai.school / password
 ```
+
+Login memakai JWT pada cookie `HttpOnly`. Role `admin` dapat mengelola
+kamera, sedangkan role `viewer` (Guru BK) hanya membaca kamera/rekaman,
+memvalidasi indikasi, dan melengkapi laporan.
 
 ## Environment Frontend
 

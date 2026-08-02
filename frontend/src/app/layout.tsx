@@ -1,21 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans, Poppins } from "next/font/google";
+import { LocalWebcamSessionHost } from "@/components/camera/local-webcam-session-host";
 import "./globals.css";
-
-const plusJakartaSans = Plus_Jakarta_Sans({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const poppins = Poppins({
-  variable: "--font-desc",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
 
 export const metadata: Metadata = {
   title: {
-    default: "BRAVE AI — Anti-Bullying CCTV Monitoring",
+    default: "BRAVE AI - Anti-Bullying CCTV Monitoring",
     template: "%s | BRAVE AI",
   },
   description:
@@ -36,7 +25,6 @@ export const viewport: Viewport = {
   themeColor: "#060a13",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
 };
 
@@ -46,8 +34,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" suppressHydrationWarning className={`${plusJakartaSans.variable} ${poppins.variable} h-full antialiased`}>
-      <body className="font-sans min-h-full flex flex-col bg-[#060a13]" suppressHydrationWarning>{children}</body>
+    <html lang="id" suppressHydrationWarning className="h-full antialiased">
+      <body className="font-sans min-h-full flex flex-col bg-[#060a13]" suppressHydrationWarning>
+        {children}
+        <LocalWebcamSessionHost />
+      </body>
     </html>
   );
 }

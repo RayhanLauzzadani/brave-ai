@@ -1,185 +1,271 @@
-"use client";
+'use client';
 
-import React, { useEffect, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
-import { cn } from "@/lib/utils";
+import React, {
+  PointerEvent as ReactPointerEvent,
+  useRef,
+  useState,
+} from 'react';
+import { cn } from '@/lib/utils';
 
 interface IncidentMarker {
   id: string;
-  time: string; // e.g. "10:15" or "10:15:30"
+  offsetSeconds: number;
+  label: string;
   description: string;
 }
 
 export interface TimelineAvailableRange {
   id: string;
-  startTime: string; // e.g. "10:15" or "10:15:30"
-  endTime: string;
+  startOffsetSeconds: number;
+  endOffsetSeconds: number;
   label?: string;
 }
 
 interface TimelineScrubberProps {
+  durationSeconds: number;
+  currentSeconds?: number;
+  startTime?: string;
   markers?: IncidentMarker[];
   availableRanges?: TimelineAvailableRange[];
-  initialTime?: string; // e.g. "08:00"
-  onTimeChange?: (time: string) => void;
+  onTimeChange?: (seconds: number) => void;
   className?: string;
 }
 
 export function TimelineScrubber({
+  durationSeconds,
+  currentSeconds = 0,
+  startTime,
   markers = [],
   availableRanges = [],
-  initialTime = "00:00",
   onTimeChange,
   className,
 }: TimelineScrubberProps) {
-  const [currentTimeSec, setCurrentTimeSec] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
+  const totalSeconds = Math.max(1, durationSeconds);
+  const [dragSeconds, setDragSeconds] = useState<number | null>(null);
+  const [activePointerId, setActivePointerId] = useState<number | null>(null);
   const [hoveredMarker, setHoveredMarker] = useState<IncidentMarker | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  const timeToSeconds = (timeStr: string) => {
-    const [hours = 0, minutes = 0, seconds = 0] = timeStr.split(":").map(Number);
-    return hours * 3600 + minutes * 60 + seconds;
-  };
-
-  const secondsToTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
-  };
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setCurrentTimeSec(timeToSeconds(initialTime));
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [initialTime]);
-
-  const totalSeconds = 24 * 3600;
+  const currentTimeSec =
+    dragSeconds ?? clampSeconds(currentSeconds, totalSeconds);
   const progressPercent = (currentTimeSec / totalSeconds) * 100;
+  const axisOffsets = [0, 0.25, 0.5, 0.75, 1].map(
+    (ratio) => totalSeconds * ratio,
+  );
 
   const handleInteract = (clientX: number) => {
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-    const percent = x / rect.width;
-    const newSeconds = Math.round(percent * totalSeconds);
-    setCurrentTimeSec(newSeconds);
-    onTimeChange?.(secondsToTime(newSeconds));
+    const nextSeconds = Math.round((x / rect.width) * totalSeconds);
+    setDragSeconds(nextSeconds);
+    onTimeChange?.(nextSeconds);
   };
 
-  const onMouseDown = (e: ReactMouseEvent) => {
-    setIsDragging(true);
-    handleInteract(e.clientX);
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActivePointerId(event.pointerId);
+    handleInteract(event.clientX);
   };
 
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        handleInteract(e.clientX);
-      }
-    };
-    const onMouseUp = () => setIsDragging(false);
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activePointerId !== event.pointerId) return;
+    handleInteract(event.clientX);
+  };
 
-    if (isDragging) {
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
+  const finishPointerInteraction = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (activePointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    setActivePointerId(null);
+    setDragSeconds(null);
+  };
 
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [isDragging]);
-
-  const handleMarkerClick = (marker: IncidentMarker, e: ReactMouseEvent) => {
-    e.stopPropagation();
-    const sec = timeToSeconds(marker.time);
-    setCurrentTimeSec(sec);
-    onTimeChange?.(secondsToTime(sec));
+  const handleMarkerClick = (
+    marker: IncidentMarker,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    event.stopPropagation();
+    const seconds = clampSeconds(marker.offsetSeconds, totalSeconds);
+    onTimeChange?.(seconds);
   };
 
   return (
-    <div className={cn("w-full select-none", className)}>
-      <div className="flex justify-between text-[10px] text-slate-400 font-medium mb-1 px-0.5">
-        <span>00:00</span>
-        <span>06:00</span>
-        <span>12:00</span>
-        <span>18:00</span>
-        <span>24:00</span>
+    <div className={cn('w-full select-none', className)}>
+      <div className='grid grid-cols-5 px-0.5 text-[9px] font-medium text-slate-400 pwa:text-[10px]'>
+        {axisOffsets.map((seconds, index) => (
+          <span
+            key={seconds}
+            className={cn(
+              index === 0 && 'text-left',
+              index > 0 && index < axisOffsets.length - 1 && 'text-center',
+              index === axisOffsets.length - 1 && 'text-right',
+            )}
+          >
+            {formatAxisTime(startTime, seconds)}
+          </span>
+        ))}
       </div>
 
       <div
-        className="relative h-8 flex items-center group cursor-pointer"
+        className='group relative flex h-9 touch-none cursor-pointer items-center'
         ref={trackRef}
-        onMouseDown={onMouseDown}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishPointerInteraction}
+        onPointerCancel={finishPointerInteraction}
       >
-        <div className="absolute w-full h-1.5 bg-slate-200 rounded-full" />
+        <div className='absolute h-1.5 w-full rounded-full bg-slate-200' />
 
         {availableRanges.map((range) => {
-          const startSecond = Math.max(0, Math.min(timeToSeconds(range.startTime), totalSeconds));
-          const endSecond = Math.max(startSecond, Math.min(timeToSeconds(range.endTime), totalSeconds));
+          const startSecond = clampSeconds(
+            range.startOffsetSeconds,
+            totalSeconds,
+          );
+          const endSecond = Math.max(
+            startSecond,
+            clampSeconds(range.endOffsetSeconds, totalSeconds),
+          );
           const left = (startSecond / totalSeconds) * 100;
-          const width = Math.max(0.25, ((endSecond - startSecond) / totalSeconds) * 100);
+          const width = Math.max(
+            0.25,
+            ((endSecond - startSecond) / totalSeconds) * 100,
+          );
 
           return (
             <div
               key={range.id}
-              className="absolute h-2 rounded-full bg-blue-500/70 shadow-sm shadow-blue-500/20"
-              style={{ left: `${left}%`, width: `${width}%` }}
+              className='absolute h-2 rounded-full bg-blue-500/70 shadow-sm shadow-blue-500/20'
+              style={{ left: left + '%', width: width + '%' }}
               title={range.label}
             />
           );
         })}
 
-        <div className="absolute w-full h-full pointer-events-none flex justify-between">
-          {Array.from({ length: 25 }).map((_, i) => (
-            <div key={i} className="h-1.5 w-px bg-slate-300/60 self-center" />
+        <div className='pointer-events-none absolute flex h-full w-full justify-between'>
+          {Array.from({ length: 25 }).map((_, index) => (
+            <div
+              key={index}
+              className='h-1.5 w-px self-center bg-slate-300/60'
+            />
           ))}
         </div>
 
         {markers.map((marker) => {
-          const markerPercent = (timeToSeconds(marker.time) / totalSeconds) * 100;
+          const markerSeconds = clampSeconds(
+            marker.offsetSeconds,
+            totalSeconds,
+          );
+          const markerPercent = (markerSeconds / totalSeconds) * 100;
           return (
-            <div
+            <button
+              type='button'
               key={marker.id}
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-              style={{ left: `${markerPercent}%` }}
-              onMouseEnter={() => setHoveredMarker(marker)}
-              onMouseLeave={() => setHoveredMarker(null)}
-              onClick={(e) => handleMarkerClick(marker, e)}
+              className='absolute top-1/2 z-10 -translate-x-1/2 -translate-y-1/2'
+              style={{ left: markerPercent + '%' }}
+              onPointerEnter={() => setHoveredMarker(marker)}
+              onPointerLeave={() => setHoveredMarker(null)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => handleMarkerClick(marker, event)}
+              aria-label={'Buka indikasi pada ' + marker.label}
             >
-              <div className="w-3 h-3 bg-red-500 border-2 border-white rounded-full shadow hover:scale-150 hover:bg-red-600 transition-transform cursor-pointer animate-pulse" />
+              <span className='block h-3 w-3 rounded-full border-2 border-white bg-red-500 shadow transition-transform hover:scale-150 hover:bg-red-600' />
 
               {hoveredMarker?.id === marker.id && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[180px] z-50">
-                  <div className="bg-slate-900 text-white text-[11px] p-2 rounded-lg shadow-lg">
-                    <div className="font-bold text-red-400 mb-0.5">{marker.time}</div>
-                    <div className="whitespace-normal leading-snug">{marker.description}</div>
-                  </div>
-                  <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[5px] border-t-slate-900 mx-auto" />
-                </div>
+                <span className='absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[180px] -translate-x-1/2'>
+                  <span className='block rounded-lg bg-slate-900 p-2 text-left text-[11px] text-white shadow-lg'>
+                    <span className='mb-0.5 block font-bold text-red-400'>
+                      {marker.label}
+                    </span>
+                    <span className='block whitespace-normal leading-snug'>
+                      {marker.description}
+                    </span>
+                  </span>
+                  <span className='mx-auto block h-0 w-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-slate-900' />
+                </span>
               )}
-            </div>
+            </button>
           );
         })}
 
         <div
-          className="absolute top-0 bottom-0 w-px bg-slate-600/40 pointer-events-none"
-          style={{ left: `${progressPercent}%` }}
+          className='pointer-events-none absolute bottom-0 top-0 w-px bg-slate-600/40'
+          style={{ left: progressPercent + '%' }}
         />
 
         <div
-          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full shadow z-20 group-hover:scale-125 group-hover:border-slate-600 transition-all"
-          style={{ left: `${progressPercent}%` }}
+          className='pointer-events-none absolute top-1/2 z-20 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-400 bg-white shadow transition-all group-hover:scale-125 group-hover:border-slate-600'
+          style={{ left: progressPercent + '%' }}
         />
       </div>
 
-      <div className="text-center mt-1.5">
-        <span className="inline-flex items-center justify-center px-2.5 py-0.5 bg-slate-100 text-slate-600 font-semibold text-[11px] rounded-md border border-slate-200">
-          {secondsToTime(currentTimeSec)}
+      <div className='mt-1 text-center'>
+        <span className='inline-flex items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600'>
+          {formatSelectedTime(startTime, currentTimeSec)}
         </span>
       </div>
     </div>
   );
+}
+
+function clampSeconds(value: number, durationSeconds: number) {
+  return Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), durationSeconds);
+}
+
+function formatAxisTime(startTime: string | undefined, offsetSeconds: number) {
+  const date = getOffsetDate(startTime, offsetSeconds);
+  if (!date) return formatElapsed(offsetSeconds);
+  return (
+    String(date.getDate()).padStart(2, '0')
+    + '/'
+    + String(date.getMonth() + 1).padStart(2, '0')
+    + ' '
+    + formatClock(date)
+  );
+}
+
+function formatSelectedTime(
+  startTime: string | undefined,
+  offsetSeconds: number,
+) {
+  const date = getOffsetDate(startTime, offsetSeconds);
+  if (!date) return formatElapsed(offsetSeconds);
+  return (
+    String(date.getDate()).padStart(2, '0')
+    + '/'
+    + String(date.getMonth() + 1).padStart(2, '0')
+    + '/'
+    + date.getFullYear()
+    + ' '
+    + formatClock(date, true)
+  );
+}
+
+function getOffsetDate(startTime: string | undefined, offsetSeconds: number) {
+  if (!startTime) return null;
+  const start = new Date(startTime);
+  if (Number.isNaN(start.getTime())) return null;
+  return new Date(start.getTime() + offsetSeconds * 1000);
+}
+
+function formatClock(date: Date, includeSeconds = false) {
+  const value = [
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+  ];
+  if (includeSeconds) value.push(String(date.getSeconds()).padStart(2, '0'));
+  return value.join(':');
+}
+
+function formatElapsed(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':');
 }

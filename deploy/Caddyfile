@@ -32,6 +32,6 @@
 	import brave_ai_app
 }
 
-http://:80 {
-	import brave_ai_app
+http://{$APP_HOST} {
+	redir https://{$APP_HOST}{uri} permanent
 }

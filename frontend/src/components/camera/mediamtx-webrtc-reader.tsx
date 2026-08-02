@@ -12,6 +12,7 @@ type MediaMtxWebRtcReaderProps = {
   url: string;
   isPlaying: boolean;
   isMuted: boolean;
+  isVisible?: boolean;
   onStatusChange?: (status: MediaMtxWebRtcReaderStatus) => void;
 };
 
@@ -19,6 +20,7 @@ export function MediaMtxWebRtcReader({
   url,
   isPlaying,
   isMuted,
+  isVisible = true,
   onStatusChange,
 }: MediaMtxWebRtcReaderProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -58,7 +60,7 @@ export function MediaMtxWebRtcReader({
     };
 
     setIsActive(false);
-    onStatusChange?.({ state: "starting", message: "Mencoba preview WebRTC latency rendah..." });
+
 
     void loadMediaMtxWebRtcReader()
       .then((Reader) => {
@@ -78,7 +80,7 @@ export function MediaMtxWebRtcReader({
             video.srcObject = stream;
             video.muted = isMutedRef.current;
             setIsActive(true);
-            onStatusChange?.({ state: "active", message: "WebRTC aktif: preview latency rendah." });
+            onStatusChange?.({ state: "active", message: "Tayangan kamera aktif." });
             if (isPlayingRef.current) {
               void video.play().catch(() => undefined);
             }
@@ -88,8 +90,8 @@ export function MediaMtxWebRtcReader({
 
             setIsActive(false);
             onStatusChange?.({
-              state: "starting",
-              message: "Koneksi WebRTC belum stabil. HLS dipakai sebagai fallback.",
+              state: "error",
+              message: getReaderErrorMessage(message),
             });
 
             if (!message.includes("retrying")) {
@@ -107,8 +109,8 @@ export function MediaMtxWebRtcReader({
         if (cancelled) return;
         setIsActive(false);
         onStatusChange?.({
-          state: "starting",
-          message: "WebRTC belum tersedia. HLS dipakai sebagai fallback.",
+          state: "error",
+          message: "Tayangan cepat belum tersedia. Menggunakan tayangan cadangan.",
         });
         scheduleRetry();
       });
@@ -129,11 +131,18 @@ export function MediaMtxWebRtcReader({
       data-live-media="webrtc"
       className={cn(
         "absolute inset-0 h-full w-full object-cover transition-opacity duration-200",
-        isActive ? "opacity-100" : "pointer-events-none opacity-0"
+        isActive && isVisible ? "opacity-100" : "pointer-events-none opacity-0"
       )}
       autoPlay={isPlaying}
       muted={isMuted}
       playsInline
     />
   );
+}
+
+function getReaderErrorMessage(message: string) {
+  if (message.toLowerCase().includes("stream not found")) {
+    return "Tayangan cepat sedang disiapkan. Menggunakan tayangan cadangan.";
+  }
+  return "Koneksi tayangan cepat terputus. Menggunakan tayangan cadangan.";
 }

@@ -64,4 +64,17 @@ backend/*.egg-info/
 !/media/recordings/.gitkeep
 /media/clips/*
 !/media/clips/.gitkeep
+/media/archives/*
+!/media/archives/.gitkeep
+/media/hls/*
+!/media/hls/.gitkeep
 /media/*.log
+
+# Manual MVP database snapshots. Copy important snapshots off the VPS.
+/backups/
+
+# Private video benchmark and generated evaluation runs.
+/datasets/*
+!/datasets/.gitkeep
+/docs/ai-evaluation/runs/*
+!/docs/ai-evaluation/runs/.gitkeep

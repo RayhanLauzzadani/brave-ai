@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { FileText, Folder, Settings, Shield, Video } from "lucide-react";
+import { LogoutButton } from "@/components/auth/logout-button";
 
 const navItems = [
   { href: "/live-view", label: "Live Camera", shortLabel: "Live", icon: Video },
@@ -102,6 +103,7 @@ export function MobileSidebar() {
             Monitoring kamera dan notifikasi berjalan normal.
           </p>
         </div>
+        <LogoutButton className="mt-3 h-11 w-full rounded-xl border border-white/15 bg-white/10 px-4 text-[13px] font-bold text-white hover:border-red-300/30 hover:bg-red-500/20" />
       </div>
     </div>
   );

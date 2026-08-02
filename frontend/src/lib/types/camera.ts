@@ -3,6 +3,7 @@
 // ==========================================
 
 export type CameraStatus = "online" | "offline" | "recording";
+export type CameraConnectionState = "live" | "waiting" | "unavailable";
 export type CameraSourceType =
   | "mock"
   | "local-webcam"
@@ -27,6 +28,14 @@ export interface Camera {
   isAiEnabled: boolean;
 }
 
+export interface CameraConnectionStatus {
+  cameraId: string;
+  mediaPath: string | null;
+  connected: boolean;
+  status: CameraConnectionState;
+  message: string;
+  checkedAt: string;
+}
 export interface CameraSourceUpdate {
   sourceType: CameraSourceType;
   streamUrl: string | null;

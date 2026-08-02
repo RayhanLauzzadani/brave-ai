@@ -8,6 +8,7 @@ Production stack runs fully on the VPS with Docker Compose:
 - PostgreSQL
 - Redis
 - MediaMTX for live stream/HLS/recording gateway
+- Recording worker for compressed 24-hour archives with 7-day retention
 
 Current VPS:
 
@@ -72,7 +73,7 @@ Ports:
 
 ## 3. Production env on VPS
 
-The VPS must keep `/opt/brave-ai-cctv/.env.production`. This file is intentionally not synced by CI/CD because it contains the real database password and secret key.
+The VPS must keep `/opt/brave-ai-cctv/.env.production`. This file is intentionally not synced by CI/CD because it contains the database password, application secret, Gemini key, and incident ingest token.
 
 For domain HTTPS, set:
 
@@ -83,6 +84,21 @@ chmod 600 .env.production
 ```
 
 Do not change `POSTGRES_PASSWORD` after PostgreSQL has already been initialized unless you also update the database user password.
+
+For centralized Gemini detection, fill these values in `.env.production`:
+
+```dotenv
+GEMINI_API_KEY=<server-side-key>
+INCIDENT_INGEST_TOKEN=<long-random-token>
+AI_DETECTION_ENABLED=true
+```
+
+The same `INCIDENT_INGEST_TOKEN` is injected into the API and AI worker by Compose. Keep `AI_DETECTION_ENABLED=false` until the Raspberry Pi stream is stable, then enable it and watch the worker:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build ai-worker api
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f ai-worker
+```
 
 ## 4. Manual deploy/restart
 
@@ -99,10 +115,11 @@ Open:
 https://brave-ai.web.id
 ```
 
-Demo login:
+Login production:
 
 ```text
-admin@braveai.school / password
+admin@braveai.school / <ADMIN_PASSWORD dari .env.production>
+gurubk@braveai.school / <VIEWER_PASSWORD dari .env.production>
 ```
 
 ## 5. GitHub Actions CI/CD
@@ -121,7 +138,7 @@ On every push to `main`, GitHub Actions will:
 4. Validate production Compose config.
 5. Sync source to `/opt/brave-ai-cctv` via SSH.
 6. Rebuild/restart Docker Compose.
-7. Run Alembic migration and seed admin user.
+7. Run Alembic migration and seed admin serta Guru BK.
 
 Create these repository secrets in GitHub:
 
@@ -135,6 +152,30 @@ APP_DIR=/opt/brave-ai-cctv
 `VPS_USER` and `APP_DIR` are optional because the workflow defaults to `root` and `/opt/brave-ai-cctv`, but adding them keeps the setup explicit.
 
 Do not put `POSTGRES_PASSWORD` or `SECRET_KEY` in GitHub unless you intentionally want CI to manage the whole `.env.production` file. For this MVP, those secrets stay on the VPS.
+
+## Backup dan ruang disk sebelum demo
+
+Scope lomba cukup memakai satu snapshot PostgreSQL manual sebelum presentasi.
+Jalankan dari VPS:
+
+```bash
+cd /opt/brave-ai-cctv
+sh deploy/check-storage.sh
+sh deploy/backup-postgres.sh
+ls -lh backups/postgres
+```
+
+Skrip backup memverifikasi file dengan `pg_restore --list` dan menjaga snapshot
+lokal selama 7 hari. Karena snapshot pada VPS yang sama bukan backup terhadap
+kerusakan VPS, salin file terbaru ke laptop sebelum demo:
+
+```powershell
+scp root@148.230.103.197:/opt/brave-ai-cctv/backups/postgres/brave-ai-<waktu>.dump .
+```
+
+Pemeriksaan storage hanya memberi status `AMAN`, `PERINGATAN`, atau `KRITIS`;
+skrip tidak menghentikan kamera maupun menghapus rekaman secara otomatis.
+Arsip dan evidence clip aplikasi tetap dibersihkan otomatis setelah 7 hari.
 
 ## 6. MediaMTX publish test
 

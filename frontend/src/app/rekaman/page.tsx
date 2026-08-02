@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
-  Bell,
   Calendar as CalendarIcon,
   Camera,
   Check,
@@ -16,9 +14,7 @@ import {
   Folder,
   Lock,
   MapPin,
-  Menu,
   MoreHorizontal,
-  MoreVertical,
   Pause,
   Play,
   RefreshCw,
@@ -31,7 +27,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
-import { MobileSidebar } from "@/components/layout/mobile-nav";
+import { DashboardPageHeader } from "@/components/layout/dashboard-page-header";
 import {
   Sheet,
   SheetContent,
@@ -45,8 +41,7 @@ import {
   VideoTrimmerModal,
   type VideoTrimExportPayload,
 } from "@/components/ui/video-trimmer-modal";
-import { useAlertStore } from "@/lib/stores/alert-store";
-import { useUiStore } from "@/lib/stores/ui-store";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -58,42 +53,33 @@ import {
   getRecordings,
   waitForEvidenceClip,
 } from "@/lib/api/recordings";
-import type { BullyingLog, Camera as CameraType, Recording, RecordingStatus } from "@/lib/types";
-
-const STATUS_OPTIONS: Array<{ value: "all" | RecordingStatus; label: string }> = [
-  { value: "all", label: "Semua Status" },
-  { value: "tersimpan", label: "Tersimpan" },
-  { value: "ditinjau", label: "Ditinjau" },
-  { value: "terkunci", label: "Terkunci" },
-];
+import type { BullyingLog, Camera as CameraType, Recording } from "@/lib/types";
 
 
 type TimelineMarker = {
   id: string;
-  time: string;
+  offsetSeconds: number;
+  label: string;
   description: string;
 };
 
 export default function RekamanPage() {
-  const router = useRouter();
-  const unreadCount = useAlertStore((s) => s.unreadCount);
-  const isCollapsed = useUiStore((s) => s.isSidebarCollapsed);
-
+  const user = useAuthStore((state) => state.user);
+  const canCreateClips = user?.role === "admin";
   const [records, setRecords] = useState<Recording[]>([]);
   const [cameras, setCameras] = useState<CameraType[]>([]);
   const [logs, setLogs] = useState<BullyingLog[]>([]);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
-  const [selectedTime, setSelectedTime] = useState("00:00");
+  const [selectedOffsetSeconds, setSelectedOffsetSeconds] = useState(0);
   const [isTrimmerOpen, setIsTrimmerOpen] = useState(false);
+  const [fullscreenRecord, setFullscreenRecord] = useState<Recording | null>(null);
   const [date, setDate] = useState<Date | undefined>(() => new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isLokasiOpen, setIsLokasiOpen] = useState(false);
   const [isKameraOpen, setIsKameraOpen] = useState(false);
-  const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [selectedLokasi, setSelectedLokasi] = useState("all");
   const [selectedKamera, setSelectedKamera] = useState("all");
-  const [selectedStatus, setSelectedStatus] = useState<"all" | RecordingStatus>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -101,6 +87,23 @@ export default function RekamanPage() {
   const playbackVideoRef = useRef<HTMLVideoElement>(null);
   const [isPlaybackPlaying, setIsPlaybackPlaying] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
+
+  useEffect(() => {
+    if (!fullscreenRecord) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreenRecord(null);
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [fullscreenRecord]);
 
   const dateRange = useMemo(() => getSevenDayRange(date ?? new Date()), [date]);
 
@@ -118,7 +121,6 @@ export default function RekamanPage() {
           cameraId: selectedKamera === "all" ? undefined : selectedKamera,
           dateFrom: dateRange.from.toISOString(),
           dateTo: dateRange.to.toISOString(),
-          status: selectedStatus,
           search: searchTerm.trim() || undefined,
           limit: 200,
         }),
@@ -133,9 +135,6 @@ export default function RekamanPage() {
         }
         return recordingResult[0]?.id ?? null;
       });
-      if (!selectedRecordId && recordingResult[0]) {
-        setSelectedTime(toScrubberTime(recordingResult[0].startTime));
-      }
     } catch (error) {
       if (!silent) {
         setErrorMessage(
@@ -148,7 +147,7 @@ export default function RekamanPage() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [dateRange.from, dateRange.to, searchTerm, selectedKamera, selectedRecordId, selectedStatus]);
+  }, [dateRange.from, dateRange.to, searchTerm, selectedKamera]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -201,7 +200,7 @@ export default function RekamanPage() {
       }
       if (selectedRecord.id !== selectedRecordId) {
         setSelectedRecordId(selectedRecord.id);
-        setSelectedTime(toScrubberTime(selectedRecord.startTime));
+        setSelectedOffsetSeconds(0);
       }
     }, 0);
 
@@ -224,34 +223,39 @@ export default function RekamanPage() {
       })
       .map((log) => ({
         id: log.id,
-        time: toScrubberTime(log.timestamp),
+        offsetSeconds: Math.max(
+          0,
+          (toDate(log.timestamp).getTime() - start) / 1000,
+        ),
+        label: formatRecordMoment(log.timestamp),
         description: log.title,
       })) satisfies TimelineMarker[];
   }, [logs, selectedRecord]);
 
-  const importantRecords = useMemo(() => {
-    const important = visibleRecords.filter(
-      (record) => record.hasIncident || record.status === "terkunci"
-    );
-    return (important.length > 0 ? important : visibleRecords).slice(0, 4);
-  }, [visibleRecords]);
-
   const selectedAvailable = selectedRecord?.storageStatus === "available";
   const availableRanges = useMemo(() => {
     if (!selectedRecord) return [];
-    const selectedDate = format(toDate(selectedRecord.startTime), "yyyy-MM-dd");
-    return records
-      .filter((record) => (
-        record.cameraId === selectedRecord.cameraId
-        && format(toDate(record.startTime), "yyyy-MM-dd") === selectedDate
-      ))
-      .map((record) => ({
-        id: record.id,
-        startTime: toScrubberTime(record.startTime),
-        endTime: toScrubberTime(record.endTime),
-        label: `${record.cameraName} ${formatRecordTime(record.startTime)}`,
-      }));
-  }, [records, selectedRecord]);
+    return [{
+      id: selectedRecord.id,
+      startOffsetSeconds: 0,
+      endOffsetSeconds: Math.max(1, selectedRecord.duration),
+      label:
+        selectedRecord.cameraName
+        + " "
+        + formatRecordTime(selectedRecord.startTime),
+    }];
+  }, [selectedRecord]);
+
+  const selectedDurationSeconds = Math.max(1, selectedRecord?.duration ?? 1);
+  const selectedTimestamp = selectedRecord
+    ? addSecondsToTimestamp(selectedRecord.startTime, selectedOffsetSeconds)
+    : null;
+  const selectedTimeLabel = selectedTimestamp
+    ? format(selectedTimestamp, "HH:mm:ss", { locale: id })
+    : "--:--:--";
+  const selectedMomentLabel = selectedTimestamp
+    ? format(selectedTimestamp, "d MMM yyyy HH:mm:ss", { locale: id })
+    : "-";
 
   const selectedPlaybackId = selectedRecord?.id ?? null;
 
@@ -259,35 +263,27 @@ export default function RekamanPage() {
     const video = playbackVideoRef.current;
     if (!video || !selectedPlaybackId) return;
 
+    setSelectedOffsetSeconds(0);
     setIsPlaybackPlaying(false);
     setPlaybackError("");
     video.pause();
     video.currentTime = 0;
   }, [selectedPlaybackId]);
 
-  const handleTimelineTimeChange = (time: string) => {
+  const handleTimelineTimeChange = (offsetSeconds: number) => {
     if (!selectedRecord) return;
 
-    const requestedTime = combineDateAndTime(selectedRecord.startTime, time);
-    const matchingRecord = records.find((record) => {
-      const start = toDate(record.startTime).getTime();
-      const end = toDate(record.endTime).getTime();
-      const requested = requestedTime.getTime();
-      return record.cameraId === selectedRecord.cameraId && requested >= start && requested <= end;
-    });
-
-    setSelectedTime(time);
-    if (matchingRecord && matchingRecord.id !== selectedRecord.id) {
-      setSelectedRecordId(matchingRecord.id);
-      return;
-    }
+    const boundedOffset = Math.min(
+      Math.max(0, offsetSeconds),
+      selectedDurationSeconds,
+    );
+    setSelectedOffsetSeconds(boundedOffset);
 
     const video = playbackVideoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    const offset = (requestedTime.getTime() - toDate(selectedRecord.startTime).getTime()) / 1000;
-    if (offset >= 0 && offset <= video.duration) {
-      video.currentTime = offset;
-    }
+    if (!video) return;
+    video.currentTime = Number.isFinite(video.duration)
+      ? Math.min(boundedOffset, video.duration)
+      : boundedOffset;
   };
 
   const handlePlaybackToggle = async () => {
@@ -310,13 +306,29 @@ export default function RekamanPage() {
 
   const selectRecord = (record: Recording) => {
     setSelectedRecordId(record.id);
-    setSelectedTime(toScrubberTime(record.startTime));
+    setSelectedOffsetSeconds(0);
     setActionMessage("");
+  };
+
+  const openFullscreenViewer = (record: Recording) => {
+    selectRecord(record);
+    playbackVideoRef.current?.pause();
+    setIsPlaybackPlaying(false);
+    setPlaybackError("");
+
+    if (record.storageStatus !== "available" || !record.playbackUrl) {
+      setActionMessage("Rekaman ini belum tersedia untuk diputar.");
+      return;
+    }
+
+    setFullscreenRecord(record);
   };
 
   const openTrimmer = (record?: Recording) => {
     const target = record ?? selectedRecord;
     if (!target) return;
+    playbackVideoRef.current?.pause();
+    setIsPlaybackPlaying(false);
     selectRecord(target);
     if (target.storageStatus === "unavailable") {
       setActionMessage("Rekaman tidak tersedia dari NVR/DVR pada waktu tersebut.");
@@ -333,8 +345,14 @@ export default function RekamanPage() {
 
     const clip = await createEvidenceClip(selectedRecord.id, {
       cameraId: selectedRecord.cameraId,
-      startTime: combineDateAndTime(selectedRecord.startTime, payload.startLabel).toISOString(),
-      endTime: combineDateAndTime(selectedRecord.startTime, payload.endLabel).toISOString(),
+      startTime: addSecondsToTimestamp(
+        selectedRecord.startTime,
+        payload.trimStart,
+      ).toISOString(),
+      endTime: addSecondsToTimestamp(
+        selectedRecord.startTime,
+        payload.trimEnd,
+      ).toISOString(),
       reason: "recording_view_trim_export",
     });
 
@@ -344,114 +362,14 @@ export default function RekamanPage() {
     setActionMessage(`Klip bukti ${readyClip.id} siap dan berhasil diunduh.`);
   };
 
-  const handleSnapshot = () => {
-    if (!selectedRecord || selectedRecord.storageStatus === "unavailable") return;
-
-    const video = playbackVideoRef.current;
-    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
-      const videoCanvas = document.createElement("canvas");
-      videoCanvas.width = video.videoWidth;
-      videoCanvas.height = video.videoHeight;
-      const videoContext = videoCanvas.getContext("2d");
-      if (videoContext) {
-        videoContext.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
-        const link = document.createElement("a");
-        link.href = videoCanvas.toDataURL("image/png");
-        link.download = `recording-snapshot-${selectedRecord.id}-${Date.now()}.png`;
-        link.click();
-        setActionMessage("Snapshot berhasil dibuat dari frame rekaman.");
-        return;
-      }
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = 1280;
-    canvas.height = 720;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
-    context.fillStyle = "#0f172a";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#1d4ed8";
-    context.fillRect(0, 0, canvas.width, 12);
-    context.fillStyle = "#ffffff";
-    context.font = "bold 44px Arial";
-    context.fillText(selectedRecord.cameraName, 64, 100);
-    context.font = "26px Arial";
-    context.fillText(`${selectedRecord.location} - ${formatRecordDate(selectedRecord.startTime)} ${selectedTime} WIB`, 64, 146);
-    context.fillStyle = "rgba(255,255,255,0.12)";
-    context.fillRect(64, 210, 1152, 360);
-    context.fillStyle = "#bfdbfe";
-    context.font = "bold 34px Arial";
-    context.fillText("BRAVE AI RECORDING SNAPSHOT", 64, 650);
-
-    const link = document.createElement("a");
-    link.href = canvas.toDataURL("image/png");
-    link.download = `recording-snapshot-${selectedRecord.id}-${Date.now()}.png`;
-    link.click();
-    setActionMessage("Snapshot rekaman berhasil dibuat dari preview.");
-  };
-
-  const handleCreateReport = () => {
-    if (!selectedRecord) return;
-    router.push(`/laporan?recordingId=${encodeURIComponent(selectedRecord.id)}`);
-  };
   return (
-    <div className="bg-[#f4f7fb] min-h-full -m-4 p-4 pwa:-m-6 pwa:p-6 font-sans text-slate-900 pb-24 pwa:pb-6">
-      {/* Mobile Top Bar with Title */}
-      <div className="flex lg:hidden items-center justify-between mb-6">
-        <div className="flex items-center gap-3 pwa:gap-4 flex-1 min-w-0">
-          <div className="hidden pwa:flex items-center">
-            <Sheet>
-              <SheetTrigger render={<button className="p-2 -ml-2 rounded-lg hover:bg-slate-200 transition-colors flex-shrink-0 focus:outline-none" />}>
-                <Menu className="w-6 h-6 text-[#1e293b]" />
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0 bg-[#064eb7] border-white/[0.06] text-white">
-                <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-                <MobileSidebar />
-              </SheetContent>
-            </Sheet>
-          </div>
-
-          <div className="flex flex-col min-w-0 flex-1">
-            <h1 className="text-[18px] pwa:text-[20px] font-bold text-[#0f172a] tracking-tight leading-tight truncate">Rekaman</h1>
-            <p className="text-[11px] font-desc text-slate-500 truncate mt-0.5">Kelola rekaman video tersimpan sebagai bukti kejadian dengan aman.</p>
-          </div>
-        </div>
-
-        <button className="relative p-2 rounded-full hover:bg-slate-200 transition-colors flex-shrink-0">
-          <Bell className="w-6 h-6 text-[#1e293b]" />
-          {unreadCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-[#f4f7fb]">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </button>
-      </div>
+    <div className="bg-[#f4f7fb] min-h-screen -m-4 p-4 pwa:-m-6 pwa:p-6 font-sans text-slate-900 pb-24 pwa:pb-6">
+      <DashboardPageHeader
+        title="Rekaman"
+        description="Rekaman setiap sesi kamera, maksimal 24 jam dan tersedia selama 7 hari."
+      />
 
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className={cn(
-          "hidden lg:flex fixed top-0 right-0 z-40 bg-white items-center justify-between h-16 px-6 lg:px-8 border-b border-slate-100 shadow-sm transition-[left] duration-300",
-          isCollapsed ? "lg:left-20" : "lg:left-64"
-        )}>
-          <div>
-            <h2 className="text-[15px] font-bold text-[#0f172a]">Rekaman</h2>
-            <p className="text-[11px] font-desc text-slate-500 -mt-0.5">Kelola rekaman video tersimpan sebagai bukti kejadian dengan aman.</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="relative flex items-center justify-center w-9 h-9 rounded-full bg-slate-50 border border-slate-100 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
-              <Bell className="w-[18px] h-[18px]" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        <div className="hidden lg:block h-10" />
-
         {/* Filter and Search Bar */}
         <div className="flex flex-col gap-3 pwa:flex-row pwa:gap-4 mb-6">
           {/* Search Bar — pill shape on mobile, standard on tablet+ */}
@@ -498,7 +416,7 @@ export default function RekamanPage() {
               <Sheet open={isMobileFilterOpen} onOpenChange={setIsMobileFilterOpen}>
                 <SheetTrigger className={cn(
                   "flex shrink-0 items-center gap-1.5 px-3.5 py-[7px] rounded-full text-[12px] font-semibold whitespace-nowrap transition-all",
-                  (selectedLokasi !== "all" || selectedStatus !== "all" || selectedKamera !== "all")
+                  (selectedLokasi !== "all" || selectedKamera !== "all")
                     ? "bg-blue-50 text-[#064eb7] border border-blue-200"
                     : "bg-white text-slate-600 border border-slate-200/60"
                 )}>
@@ -537,7 +455,6 @@ export default function RekamanPage() {
                     <button
                       onClick={() => {
                         setSelectedLokasi("all");
-                        setSelectedStatus("all");
                         setSelectedKamera("all");
                       }}
                       className="text-[13px] font-semibold text-[#064eb7] hover:text-[#053e94] transition-colors"
@@ -559,27 +476,6 @@ export default function RekamanPage() {
                             className={cn(
                               "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
                               selectedLokasi === opt.value
-                                ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
-                                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
-                            )}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Status */}
-                    <div>
-                      <h3 className="text-[13px] font-bold text-[#0f172a] uppercase tracking-wide mb-3">Status</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {STATUS_OPTIONS.map(opt => (
-                          <button
-                            key={opt.value}
-                            onClick={() => setSelectedStatus(opt.value)}
-                            className={cn(
-                              "px-4 py-2 rounded-full text-[13px] font-medium transition-all border",
-                              selectedStatus === opt.value
                                 ? "bg-[#064eb7] text-white border-[#064eb7] shadow-sm"
                                 : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
                             )}
@@ -683,40 +579,13 @@ export default function RekamanPage() {
                 </PopoverContent>
               </Popover>
 
-              <Popover open={isStatusOpen} onOpenChange={setIsStatusOpen}>
-                <PopoverTrigger className={cn(
-                  "flex shrink-0 items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-colors",
-                  selectedStatus !== "all"
-                    ? "bg-white text-slate-700 border-slate-200 shadow-sm"
-                    : "bg-white text-slate-700 border-slate-200 shadow-sm border"
-                )}>
-                  <ShieldCheck className="w-4 h-4 text-slate-400 pwa:text-slate-500" />
-                  {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.label ?? "Status"}
-                  <ChevronDown className="w-4 h-4 text-slate-400" />
-                </PopoverTrigger>
-                <PopoverContent className="w-auto min-w-[180px] p-1.5 bg-white border border-slate-200 shadow-lg rounded-xl" align="start">
-                  {STATUS_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      onClick={() => { setSelectedStatus(option.value); setIsStatusOpen(false); }}
-                      className={cn(
-                        "flex items-center justify-between w-full px-3 py-2 text-sm rounded-lg transition-colors text-left",
-                        selectedStatus === option.value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
-                      )}
-                    >
-                      {option.label}
-                      {selectedStatus === option.value && <Check className="w-4 h-4 text-blue-600 ml-3" />}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
             </div>
           </div>
         </div>
 
         {/* Main Content Area */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-8 flex flex-col">
+          <div className="order-2 flex flex-col lg:order-1 lg:col-span-8">
             <div className="bg-white rounded-2xl pwa:rounded-[24px] border border-slate-100 shadow-sm overflow-hidden mb-4 pwa:mb-6">
               <div className="flex items-center justify-between p-4 pwa:p-5 border-b-0 pwa:border-b border-slate-100">
                 <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Daftar Rekaman</h2>
@@ -746,7 +615,7 @@ export default function RekamanPage() {
                       <VideoOff className="w-7 h-7 text-slate-400" />
                     </div>
                     <h3 className="text-[14px] pwa:text-[15px] font-bold text-[#1e293b] mb-1.5">Tidak ada rekaman</h3>
-                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[280px]">Belum ada data rekaman pada tanggal, lokasi, atau kamera ini.</p>
+                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[300px]">Rekaman akan muncul setelah kamera berhenti atau mencapai batas 24 jam.</p>
                   </div>
                 ) : (                  visibleRecords.map((record) => (
                     <div
@@ -791,26 +660,29 @@ export default function RekamanPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center justify-between pwa:justify-end gap-2 pwa:gap-3 mt-auto pwa:mt-0 pt-1.5 pwa:pt-0">
-                          <div className={`hidden pwa:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold ${getStatusStyle(record.status)}`}>
-                            {getStatusIcon(record.status)}
-                            {getStatusLabel(record.status)}
+                          <div className={cn(
+                            "hidden pwa:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold",
+                            record.storageStatus === "unavailable"
+                              ? "bg-slate-100 text-slate-600 border-slate-200"
+                              : record.hasIncident
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-emerald-50 text-emerald-600 border-emerald-100",
+                          )}>
+                            {record.storageStatus === "unavailable" || record.hasIncident ? (
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            )}
+                            {record.storageStatus === "unavailable"
+                              ? "Tidak Tersedia"
+                              : record.hasIncident
+                                ? "Ada Indikasi"
+                                : "Tersedia"}
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                            <button onClick={(event) => { event.stopPropagation(); selectRecord(record); }} className="px-2.5 sm:px-3 pwa:px-3 py-1 pwa:py-1.5 text-blue-600 font-semibold text-[11px] pwa:text-xs bg-white pwa:bg-blue-50 hover:bg-blue-50 pwa:hover:bg-blue-100 rounded-[6px] pwa:rounded-lg transition-colors border border-blue-200 pwa:border-blue-100">
+                            <button onClick={(event) => { event.stopPropagation(); openFullscreenViewer(record); }} className="px-2.5 sm:px-3 pwa:px-3 py-1 pwa:py-1.5 text-blue-600 font-semibold text-[11px] pwa:text-xs bg-white pwa:bg-blue-50 hover:bg-blue-50 pwa:hover:bg-blue-100 rounded-[6px] pwa:rounded-lg transition-colors border border-blue-200 pwa:border-blue-100">
                               Lihat
-                            </button>
-                            {record.storageStatus === "available" ? (
-                              <button onClick={(event) => { event.stopPropagation(); openTrimmer(record); }} className="flex items-center justify-center gap-1 px-2.5 sm:px-3 pwa:px-3 py-1 pwa:py-1.5 text-blue-600 font-semibold text-[11px] pwa:text-xs bg-white hover:bg-blue-50 border border-blue-200 pwa:border-blue-200 rounded-[6px] pwa:rounded-lg transition-colors">
-                                <Lock className="w-3 h-3 pwa:w-3.5 pwa:h-3.5" /> Simpan
-                              </button>
-                            ) : (
-                              <button onClick={(event) => { event.stopPropagation(); selectRecord(record); }} className="flex items-center justify-center gap-1 px-2.5 sm:px-3 pwa:px-3 py-1 pwa:py-1.5 text-blue-600 pwa:text-purple-600 font-semibold text-[11px] pwa:text-xs bg-white hover:bg-blue-50 pwa:hover:bg-purple-50 border border-blue-200 pwa:border-purple-200 rounded-[6px] pwa:rounded-lg transition-colors">
-                                <Lock className="w-3 h-3 pwa:hidden" /> Detail
-                              </button>
-                            )}
-                            <button className="hidden pwa:block p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
-                              <MoreVertical className="w-5 h-5" />
                             </button>
                           </div>
                         </div>
@@ -840,7 +712,7 @@ export default function RekamanPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-4 flex flex-col">
+          <div className="order-1 flex flex-col lg:order-2 lg:col-span-4">
             <div className="bg-white rounded-2xl pwa:rounded-[24px] border border-slate-100 shadow-sm flex flex-col mb-6 lg:mb-0 overflow-hidden">
               <div className="px-4 py-3.5 pwa:px-5 pwa:py-5 border-b border-slate-100 mb-4 pwa:mb-5">
                 <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Detail Rekaman Terpilih</h2>
@@ -862,8 +734,7 @@ export default function RekamanPage() {
                           onLoadedData={() => setPlaybackError("")}
                           onError={() => setPlaybackError("File rekaman belum bisa diputar. Coba Muat Ulang atau pilih segment lain.")}
                           onTimeUpdate={(event) => {
-                            const time = new Date(toDate(selectedRecord.startTime).getTime() + event.currentTarget.currentTime * 1000);
-                            setSelectedTime(format(time, "HH:mm"));
+                            setSelectedOffsetSeconds(event.currentTarget.currentTime);
                           }}
                         />
                       ) : (
@@ -885,7 +756,7 @@ export default function RekamanPage() {
                         {selectedAvailable ? "REKAMAN" : "NVR/DVR ERROR"}
                       </div>
                       <div className="absolute bottom-2 right-2 bg-black/80 px-2 py-1 rounded flex items-center gap-1 text-[11px] font-bold text-white border border-white/20">
-                        {selectedRecord.cameraName} - {selectedTime}
+                        {selectedRecord.cameraName} - {selectedTimeLabel}
                       </div>
                       {playbackError && (
                         <div className="absolute inset-x-3 bottom-10 rounded-lg bg-red-950/85 px-3 py-2 text-center text-[11px] font-medium text-red-50 backdrop-blur-sm">
@@ -895,7 +766,7 @@ export default function RekamanPage() {
                     </div>
                     <div className="mb-6">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-700">Timeline Hari Ini</span>
+                        <span className="text-xs font-bold text-slate-700">Timeline Rekaman</span>
                         <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
                           <span className="inline-block w-2 h-2 bg-red-500 rounded-full mr-1" />
                           Indikasi Bullying
@@ -903,8 +774,10 @@ export default function RekamanPage() {
                       </div>
                       {selectedAvailable ? (
                         <TimelineScrubber
+                          durationSeconds={selectedDurationSeconds}
+                          currentSeconds={selectedOffsetSeconds}
+                          startTime={selectedRecord.startTime}
                           markers={incidentMarkers}
-                          initialTime={selectedTime}
                           availableRanges={availableRanges}
                           onTimeChange={handleTimelineTimeChange}
                         />
@@ -930,7 +803,11 @@ export default function RekamanPage() {
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
                           <Clock className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Waktu Terpilih
                         </div>
-                        <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">{formatRecordDate(selectedRecord.startTime)} <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{selectedTime}</span></div>
+                        <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">
+                          <span className="rounded bg-blue-50 px-1.5 py-0.5 font-bold text-blue-600">
+                            {selectedMomentLabel} WIB
+                          </span>
+                        </div>
                       </div>
                       <div className="flex items-start">
                         <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
@@ -949,24 +826,28 @@ export default function RekamanPage() {
                           </div>
                         </div>
                       </div>
+                      {selectedRecord.expiresAt && (
+                        <div className="flex items-start">
+                          <div className="w-28 pwa:w-32 flex items-center gap-1.5 pwa:gap-2 text-slate-500 text-[11px] pwa:text-xs">
+                            <CalendarIcon className="w-3.5 h-3.5 pwa:w-4 pwa:h-4" /> Tersedia Hingga
+                          </div>
+                          <div className="flex-1 text-[13px] pwa:text-[14px] font-medium text-[#1e293b]">
+                            {formatRecordDate(selectedRecord.expiresAt)} {formatRecordTime(selectedRecord.expiresAt)}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-col gap-2.5 mb-5">
-                      <button
-                        onClick={() => openTrimmer()}
-                        disabled={!selectedAvailable}
-                        className="w-full flex items-center justify-center gap-2 bg-[#1b64f2] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm transition-colors shadow-sm disabled:bg-slate-300 disabled:text-slate-500"
-                      >
-                        <Lock className="w-4 h-4" /> Potong & Simpan Klip ({selectedTime})
-                      </button>
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <button onClick={handleSnapshot} disabled={!selectedAvailable} className="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-blue-600 border border-blue-200 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-sm disabled:text-slate-400 disabled:border-slate-200">
-                          <Camera className="w-4 h-4" /> Snapshot
+                      {canCreateClips && (
+                        <button
+                          onClick={() => openTrimmer()}
+                          disabled={!selectedAvailable}
+                          className="w-full flex items-center justify-center gap-2 bg-[#1b64f2] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm transition-colors shadow-sm disabled:bg-slate-300 disabled:text-slate-500"
+                        >
+                          <Lock className="w-4 h-4" /> Potong & Simpan Klip ({selectedTimeLabel})
                         </button>
-                        <button onClick={handleCreateReport} className="w-full flex items-center justify-center gap-2 bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-100 py-2.5 rounded-xl font-bold text-sm transition-colors shadow-sm">
-                          <ShieldCheck className="w-4 h-4" /> Buat Laporan
-                        </button>
-                      </div>
+                      )}
                     </div>
 
                     {actionMessage && (
@@ -979,7 +860,7 @@ export default function RekamanPage() {
                     <div className={cn("border rounded-xl p-3 flex items-start gap-3 mt-auto", selectedAvailable ? "bg-blue-50/50 border-blue-100" : "bg-amber-50/70 border-amber-100")}>
                       {selectedAvailable ? <ShieldCheck className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />}
                       <p className={cn("text-xs leading-relaxed font-medium", selectedAvailable ? "text-blue-800" : "text-amber-800")}>
-                        {selectedAvailable ? "Rekaman ini dilindungi dan tidak dapat dihapus untuk menjaga keaslian bukti." : "Exception flow aktif: NVR/DVR kamera tidak menayangkan rekaman ulang pada detik atau jam tertentu."}
+                        {selectedAvailable ? "Rekaman telah dikompresi untuk pemutaran dan otomatis dihapus setelah masa simpan 7 hari berakhir." : "Arsip video tidak tersedia pada waktu ini. Muat ulang atau periksa penyimpanan server."}
                       </p>
                     </div>
                   </>
@@ -997,52 +878,6 @@ export default function RekamanPage() {
           </div>
         </div>
 
-        <div className="mb-8">
-          <div className="bg-white rounded-[24px] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between p-4 pwa:p-5 border-b border-slate-100">
-              <h2 className="text-[16px] pwa:text-[18px] font-bold text-[#1e293b]">Rekaman Penting</h2>
-              <button className="text-blue-600 text-sm font-bold hover:underline">Lihat Semua</button>
-            </div>
-
-            <div className="p-4 pwa:p-5">
-              {importantRecords.length === 0 ? (
-                <div className="text-sm text-slate-500 font-medium">Belum ada rekaman penting pada rentang waktu ini.</div>
-              ) : (
-                <div className="flex overflow-x-auto hide-scrollbar gap-4 -mx-4 px-4 pwa:mx-0 pwa:px-0 pwa:overflow-visible pwa:grid pwa:grid-cols-4 lg:grid-cols-4">
-                  {importantRecords.map((record) => (
-                    <div key={`imp-${record.id}`} className="flex-shrink-0 w-[240px] pwa:w-auto flex flex-col gap-3">
-                      <div onClick={() => selectRecord(record)} className="relative w-full aspect-video rounded-xl overflow-hidden group cursor-pointer">
-                        <RecordingPreview
-                          src={record.playbackUrl}
-                          label={record.cameraName}
-                          unavailable={record.storageStatus === "unavailable"}
-                          className="transition-transform duration-300 group-hover:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-black/10 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                          <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/40">
-                            {record.storageStatus === "unavailable" ? <AlertTriangle className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white fill-white ml-0.5" />}
-                          </div>
-                        </div>
-                        <div className="absolute bottom-1.5 right-1.5 bg-black/80 px-1.5 py-0.5 rounded text-[10px] font-bold text-white">
-                          {formatDuration(record.duration)}
-                        </div>
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-[13px] pwa:text-[15px] font-bold text-[#1e293b] truncate">{record.cameraName}</h3>
-                          <p className="text-[11px] text-slate-500 mt-0.5">{formatRecordTime(record.startTime)}</p>
-                        </div>
-                        <button onClick={() => selectRecord(record)} className="px-3 py-1.5 text-blue-600 text-[11px] font-bold bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">
-                          Lihat
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
 
       {selectedRecord && (
@@ -1058,8 +893,59 @@ export default function RekamanPage() {
             duration: selectedRecord.duration,
             startTime: selectedRecord.startTime,
           }}
-          eventTime={selectedTime}
+          eventTime={selectedTimestamp?.toISOString() ?? selectedRecord.startTime}
+          canExport={canCreateClips}
         />
+      )}
+
+      {fullscreenRecord && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Pemutar rekaman ${fullscreenRecord.cameraName}`}
+          className="fixed inset-0 z-[100] flex flex-col bg-black"
+        >
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-4 bg-gradient-to-b from-black/90 to-transparent px-4 py-4 text-white sm:px-6">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-bold sm:text-base">
+                {fullscreenRecord.cameraName}
+              </h2>
+              <p className="truncate text-xs text-white/70">
+                {formatRecordDate(fullscreenRecord.startTime)} {formatRecordTime(fullscreenRecord.startTime)} · {fullscreenRecord.location}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFullscreenRecord(null)}
+              aria-label="Tutup pemutar rekaman"
+              className="flex size-10 flex-none items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
+
+          <video
+            key={fullscreenRecord.id}
+            src={fullscreenRecord.playbackUrl ?? undefined}
+            className="h-full w-full object-contain"
+            controls
+            autoPlay
+            playsInline
+            preload="auto"
+            onTimeUpdate={(event) => {
+              setSelectedOffsetSeconds(event.currentTarget.currentTime);
+            }}
+            onError={() => {
+              setPlaybackError("File rekaman belum bisa diputar. Coba Muat Ulang.");
+            }}
+          />
+
+          {playbackError && (
+            <div className="pointer-events-none absolute inset-x-4 bottom-20 z-10 mx-auto max-w-lg rounded-xl bg-red-950/90 px-4 py-3 text-center text-sm font-medium text-red-50">
+              {playbackError}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1088,8 +974,8 @@ function formatRecordTime(value: string) {
   return `${format(toDate(value), "HH:mm", { locale: id })} WIB`;
 }
 
-function toScrubberTime(value: string) {
-  return format(toDate(value), "HH:mm", { locale: id });
+function formatRecordMoment(value: string) {
+  return format(toDate(value), "d MMM yyyy HH:mm:ss", { locale: id });
 }
 
 function formatDuration(seconds: number) {
@@ -1104,44 +990,7 @@ function formatDuration(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
-function getStatusLabel(status: RecordingStatus) {
-  const labels: Record<RecordingStatus, string> = {
-    tersimpan: "Tersimpan",
-    ditinjau: "Ditinjau",
-    terkunci: "Terkunci",
-  };
-  return labels[status];
-}
-
-function getStatusStyle(status: RecordingStatus) {
-  switch (status) {
-    case "tersimpan":
-      return "bg-emerald-50 text-emerald-600 border-emerald-100";
-    case "ditinjau":
-      return "bg-blue-50 text-blue-600 border-blue-100";
-    case "terkunci":
-      return "bg-purple-50 text-purple-600 border-purple-100";
-    default:
-      return "bg-slate-50 text-slate-600 border-slate-100";
-  }
-}
-
-function getStatusIcon(status: RecordingStatus) {
-  switch (status) {
-    case "tersimpan":
-    case "ditinjau":
-      return <CheckCircle2 className="w-3.5 h-3.5" />;
-    case "terkunci":
-      return <Lock className="w-3.5 h-3.5" />;
-    default:
-      return null;
-  }
-}
-
-function combineDateAndTime(baseIso: string, timeLabel: string) {
+function addSecondsToTimestamp(baseIso: string, seconds: number) {
   const base = toDate(baseIso);
-  const [hour = 0, minute = 0, second = 0] = timeLabel.split(":").map(Number);
-  const next = new Date(base);
-  next.setHours(hour, minute, second, 0);
-  return next;
+  return new Date(base.getTime() + Math.max(0, seconds) * 1000);
 }

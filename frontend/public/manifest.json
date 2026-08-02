@@ -1,5 +1,5 @@
 {
-  "name": "BRAVE AI — Anti-Bullying Monitoring",
+  "name": "BRAVE AI - Anti-Bullying Monitoring",
   "short_name": "BRAVE",
   "description": "Dashboard monitoring CCTV berbasis AI untuk deteksi dan pencegahan bullying di lingkungan sekolah.",
   "start_url": "/live-view",
@@ -10,9 +10,33 @@
   "categories": ["education", "security"],
   "shortcuts": [
     {
-      "name": "Camera Station",
-      "short_name": "Station",
-      "url": "/camera-station",
+      "name": "Live Camera",
+      "short_name": "Live",
+      "url": "/live-view",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Rekaman",
+      "short_name": "Rekaman",
+      "url": "/rekaman",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Laporan",
+      "short_name": "Laporan",
+      "url": "/laporan",
       "icons": [
         {
           "src": "/icons/icon-192x192.png",

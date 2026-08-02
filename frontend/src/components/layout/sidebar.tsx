@@ -4,17 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  Home,
   Video,
   Folder,
   FileText,
   Shield,
-  CheckCircle2,
-  Smartphone,
-  Share,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { LogoutButton } from "@/components/auth/logout-button";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useUiStore } from "@/lib/stores/ui-store";
 
@@ -121,10 +118,12 @@ export function Sidebar() {
               <p className="text-[11px] text-white/60">Selamat datang,</p>
               <p className="text-[13px] font-semibold text-white truncate">{user?.name || "Budi Santoso"}</p>
               <div className="mt-0.5 inline-block px-2 py-0.5 bg-blue-500/40 rounded-md text-[10px] text-white/90">
-                {user?.role === "admin" ? "Admin Sekolah" : "Admin Sekolah"}
+                {user?.role === "viewer" ? "Guru BK" : "Admin Sekolah"}
               </div>
             </div>
           </div>
+
+          <LogoutButton className="h-10 w-full rounded-xl border border-white/10 bg-white/10 px-3 text-[12px] font-bold text-white/90 hover:border-red-300/30 hover:bg-red-500/20 hover:text-white" />
 
           {/* System Status */}
           <div className="bg-white/10 rounded-2xl p-3.5">
@@ -147,6 +146,10 @@ export function Sidebar() {
           <div className="w-9 h-9 rounded-full bg-orange-200 flex-shrink-0 overflow-hidden" title={user?.name || "Budi Santoso"}>
             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix&backgroundColor=ffdfbf" alt="User" className="w-full h-full object-cover" />
           </div>
+          <LogoutButton
+            compact
+            className="h-10 w-10 rounded-xl border border-white/10 bg-white/10 text-white/80 hover:bg-red-500/20 hover:text-white"
+          />
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" title="System Online" />
         </div>
       </div>

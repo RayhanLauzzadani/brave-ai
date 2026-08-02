@@ -3,43 +3,89 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import AdminUser, CurrentUser
 from app.db.session import get_db_session
 from app.repositories.cameras import (
     create_camera,
     delete_camera,
     get_camera,
     list_cameras,
+    rename_camera,
     to_camera_schema,
     update_camera_source,
 )
-from app.schemas import Camera, CameraCreate, CameraSourceUpdate
+from app.schemas import (
+    Camera,
+    CameraConnectionStatus,
+    CameraCreate,
+    CameraRename,
+    CameraSourceUpdate,
+)
+from app.services.camera_connections import probe_camera_connection
 
 router = APIRouter()
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 @router.post("", response_model=Camera, status_code=status.HTTP_201_CREATED)
-async def create_camera_route(payload: CameraCreate, session: DbSession) -> Camera:
+async def create_camera_route(
+    payload: CameraCreate,
+    session: DbSession,
+    _admin: AdminUser,
+) -> Camera:
     camera = await create_camera(session, payload)
     return to_camera_schema(camera)
 
 
 @router.get("", response_model=list[Camera])
-async def get_cameras(session: DbSession) -> list[Camera]:
+async def get_cameras(session: DbSession, _user: CurrentUser) -> list[Camera]:
     cameras = await list_cameras(session)
     return [to_camera_schema(camera) for camera in cameras]
 
 
+@router.get("/{camera_id}/connection", response_model=CameraConnectionStatus)
+async def get_camera_connection_route(
+    camera_id: str,
+    session: DbSession,
+    _user: CurrentUser,
+) -> CameraConnectionStatus:
+    camera = await get_camera(session, camera_id)
+    if not camera:
+        raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
+    return await probe_camera_connection(camera.id, camera.media_path)
+
+
 @router.get("/{camera_id}", response_model=Camera)
-async def get_camera_route(camera_id: str, session: DbSession) -> Camera:
+async def get_camera_route(
+    camera_id: str,
+    session: DbSession,
+    _user: CurrentUser,
+) -> Camera:
     camera = await get_camera(session, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
     return to_camera_schema(camera)
 
 
+@router.patch("/{camera_id}", response_model=Camera)
+async def rename_camera_route(
+    camera_id: str,
+    payload: CameraRename,
+    session: DbSession,
+    _admin: AdminUser,
+) -> Camera:
+    camera = await rename_camera(session, camera_id, payload.name, payload.location)
+    if not camera:
+        raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
+    return to_camera_schema(camera)
+
+
 @router.delete("/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_camera(camera_id: str, session: DbSession) -> None:
+async def remove_camera(
+    camera_id: str,
+    session: DbSession,
+    _admin: AdminUser,
+) -> None:
     success = await delete_camera(session, camera_id)
     if not success:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -50,6 +96,7 @@ async def patch_camera_source(
     camera_id: str,
     payload: CameraSourceUpdate,
     session: DbSession,
+    _admin: AdminUser,
 ) -> Camera:
     camera = await update_camera_source(session, camera_id, payload)
     if not camera:

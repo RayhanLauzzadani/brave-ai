@@ -5,15 +5,23 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.session import AsyncSessionLocal
 from app.repositories.cameras import list_cameras, to_camera_schema
 from app.repositories.reporting import (
+    delete_expired_evidence_clip_models,
     get_evidence_clip,
     list_pending_evidence_clip_ids,
     update_evidence_clip_status,
 )
+from app.repositories.recordings import get_recording_model
 from app.schemas import Camera, EvidenceClipResponse, RecordingSegment
+from app.services.recording_archiver import resolve_archive_file
+from app.services.media_validation import (
+    MediaValidationError,
+    covers_time_range,
+    validate_rendered_video,
+)
 from app.services.recording_segments import (
     get_recording_segment_file,
     list_recording_segments,
@@ -70,6 +78,44 @@ async def recover_pending_evidence_clips() -> None:
         schedule_evidence_clip(clip_id)
 
 
+async def run_evidence_clip_cleanup(
+    settings: Settings | None = None,
+    *,
+    run_once: bool = False,
+) -> None:
+    settings = settings or get_settings()
+    while True:
+        try:
+            await cleanup_expired_evidence_clips(settings)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Pembersihan evidence clip kedaluwarsa gagal")
+
+        if run_once:
+            return
+        await asyncio.sleep(max(60, settings.evidence_clip_cleanup_poll_seconds))
+
+
+async def cleanup_expired_evidence_clips(
+    settings: Settings | None = None,
+    *,
+    now: datetime | None = None,
+) -> int:
+    settings = settings or get_settings()
+    cutoff = _aware(now or datetime.now(UTC)) - timedelta(
+        days=max(1, settings.evidence_clip_retention_days)
+    )
+    async with AsyncSessionLocal() as session:
+        expired_ids = await delete_expired_evidence_clip_models(session, cutoff)
+
+    for clip_id in expired_ids:
+        _delete_clip_files(clip_id, settings)
+    if expired_ids:
+        logger.info("Menghapus %s evidence clip kedaluwarsa", len(expired_ids))
+    return len(expired_ids)
+
+
 async def shutdown_evidence_clip_tasks() -> None:
     tasks = list(_RUNNING_TASKS.values())
     for task in tasks:
@@ -97,9 +143,29 @@ async def _process_evidence_clip(clip_id: str) -> None:
             if not clip or clip.status == "ready":
                 return
             cameras = [to_camera_schema(item) for item in await list_cameras(session)]
+            archive = await get_recording_model(
+                session,
+                clip.recording_id,
+                ready_only=True,
+            )
+
+        archive_file = resolve_archive_file(archive.file_path if archive else None)
+        archive_source = (
+            ClipSource(
+                path=archive_file,
+                start_time=_aware(archive.start_time),
+                end_time=_aware(archive.end_time),
+            )
+            if archive is not None and archive_file is not None
+            else None
+        )
 
         await _set_clip_status(clip_id, "processing")
-        plan = await _wait_for_render_plan(clip, cameras)
+        plan = await _wait_for_render_plan(
+            clip,
+            cameras,
+            archive_source=archive_source,
+        )
         async with _FFMPEG_SEMAPHORE:
             output_path = await _render_clip(clip_id, plan)
         await _set_clip_status(clip_id, "ready", clip_url=_clip_url(clip_id))
@@ -111,7 +177,9 @@ async def _process_evidence_clip(clip_id: str) -> None:
         try:
             await _set_clip_status(clip_id, "failed")
         except Exception:
-            logger.exception("Evidence clip %s failure status could not be saved", clip_id)
+            logger.exception(
+                "Evidence clip %s failure status could not be saved", clip_id
+            )
         _cleanup_output(clip_id)
 
 
@@ -133,15 +201,25 @@ async def _set_clip_status(
 async def _wait_for_render_plan(
     clip: EvidenceClipResponse,
     cameras: list[Camera],
+    *,
+    archive_source: ClipSource | None = None,
 ) -> ClipRenderPlan:
     settings = get_settings()
-    deadline = asyncio.get_running_loop().time() + settings.evidence_clip_source_wait_seconds
+    archive_plan = _build_single_source_plan(clip, archive_source)
+    if archive_plan and _plan_covers_request(archive_plan, clip):
+        return archive_plan
+
+    deadline = (
+        asyncio.get_running_loop().time() + settings.evidence_clip_source_wait_seconds
+    )
     finalized_at = _aware(clip.end_time) + timedelta(
         seconds=settings.media_record_segment_duration_seconds + 2
     )
     initial_delay = (finalized_at - datetime.now(UTC)).total_seconds()
     if initial_delay > 0:
-        await asyncio.sleep(min(initial_delay, max(0, deadline - asyncio.get_running_loop().time())))
+        await asyncio.sleep(
+            min(initial_delay, max(0, deadline - asyncio.get_running_loop().time()))
+        )
 
     latest_plan: ClipRenderPlan | None = None
     while True:
@@ -152,11 +230,35 @@ async def _wait_for_render_plan(
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             if latest_plan:
-                return latest_plan
+                raise EvidenceClipProcessingError(
+                    "Segment MediaMTX belum lengkap untuk seluruh rentang clip."
+                )
             raise EvidenceClipProcessingError(
                 "Tidak ada segment MediaMTX yang mencakup rentang clip."
             )
         await asyncio.sleep(min(5, remaining))
+
+
+def _build_single_source_plan(
+    clip: EvidenceClipResponse,
+    source: ClipSource | None,
+) -> ClipRenderPlan | None:
+    if source is None:
+        return None
+
+    clip_start = _aware(clip.start_time)
+    clip_end = _aware(clip.end_time)
+    actual_start = max(clip_start, source.start_time)
+    actual_end = min(clip_end, source.end_time)
+    duration = (actual_end - actual_start).total_seconds()
+    if duration < 1:
+        return None
+
+    return ClipRenderPlan(
+        sources=[source],
+        offset_seconds=max(0, (actual_start - source.start_time).total_seconds()),
+        duration_seconds=duration,
+    )
 
 
 def _build_render_plan(
@@ -207,9 +309,20 @@ def _build_render_plan(
 def _plan_covers_request(
     plan: ClipRenderPlan,
     clip: EvidenceClipResponse,
+    *,
+    tolerance_seconds: float | None = None,
 ) -> bool:
-    requested_duration = (_aware(clip.end_time) - _aware(clip.start_time)).total_seconds()
-    return plan.duration_seconds >= max(1, requested_duration - 1)
+    tolerance = (
+        get_settings().evidence_clip_gap_tolerance_seconds
+        if tolerance_seconds is None
+        else tolerance_seconds
+    )
+    return covers_time_range(
+        ((source.start_time, source.end_time) for source in plan.sources),
+        _aware(clip.start_time),
+        _aware(clip.end_time),
+        tolerance_seconds=tolerance,
+    )
 
 
 def _overlaps(
@@ -217,7 +330,9 @@ def _overlaps(
     clip_start: datetime,
     clip_end: datetime,
 ) -> bool:
-    return _aware(segment.end_time) > clip_start and _aware(segment.start_time) < clip_end
+    return (
+        _aware(segment.end_time) > clip_start and _aware(segment.start_time) < clip_end
+    )
 
 
 async def _render_clip(clip_id: str, plan: ClipRenderPlan) -> Path:
@@ -253,7 +368,9 @@ async def _render_clip(clip_id: str, plan: ClipRenderPlan) -> Path:
     except TimeoutError as error:
         process.kill()
         await process.communicate()
-        raise EvidenceClipProcessingError("FFmpeg melewati batas waktu proses.") from error
+        raise EvidenceClipProcessingError(
+            "FFmpeg melewati batas waktu proses."
+        ) from error
     finally:
         manifest_path.unlink(missing_ok=True)
 
@@ -264,6 +381,20 @@ async def _render_clip(clip_id: str, plan: ClipRenderPlan) -> Path:
     if not temporary_path.is_file() or temporary_path.stat().st_size < 1024:
         temporary_path.unlink(missing_ok=True)
         raise EvidenceClipProcessingError("Hasil clip FFmpeg kosong.")
+
+    try:
+        await validate_rendered_video(
+            temporary_path,
+            expected_duration_seconds=plan.duration_seconds,
+            duration_tolerance_seconds=(
+                settings.evidence_clip_output_duration_tolerance_seconds
+            ),
+            ffprobe_binary=settings.ffprobe_binary,
+            timeout_seconds=settings.ffprobe_timeout_seconds,
+        )
+    except MediaValidationError as error:
+        temporary_path.unlink(missing_ok=True)
+        raise EvidenceClipProcessingError(str(error)) from error
 
     temporary_path.replace(output_path)
     return output_path
@@ -332,6 +463,19 @@ def _clip_url(clip_id: str) -> str:
 def _cleanup_output(clip_id: str) -> None:
     root = Path(get_settings().media_clips_dir)
     for name in (f".{clip_id}.ffconcat", f".{clip_id}.part.mp4"):
+        (root / name).unlink(missing_ok=True)
+
+
+def _delete_clip_files(clip_id: str, settings: Settings) -> None:
+    if not _CLIP_ID_PATTERN.fullmatch(clip_id):
+        logger.warning("Lewati cleanup evidence clip dengan ID tidak valid: %s", clip_id)
+        return
+    root = Path(settings.media_clips_dir)
+    for name in (
+        f"{clip_id}.mp4",
+        f".{clip_id}.ffconcat",
+        f".{clip_id}.part.mp4",
+    ):
         (root / name).unlink(missing_ok=True)
 
 

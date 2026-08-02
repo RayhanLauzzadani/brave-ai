@@ -8,8 +8,8 @@
   --breakpoint-pwa: 501px;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-desc: var(--font-desc);
+  --font-sans: var(--font-brave-sans);
+  --font-desc: var(--font-brave-desc);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -56,6 +56,10 @@
    ========================================== */
 
 :root {
+  --font-brave-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --font-brave-desc: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   --background: oklch(0.12 0.01 250);
   --foreground: oklch(0.96 0 0);
   --card: oklch(0.16 0.01 250);

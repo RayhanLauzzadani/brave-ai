@@ -9,24 +9,137 @@ services:
       DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
       REDIS_URL: redis://redis:6379/0
       MEDIA_HLS_BASE_URL: http://localhost:8888
+      MEDIA_HLS_PROBE_BASE_URL: http://mediamtx:8888
+      MEDIA_PROBE_TIMEOUT_SECONDS: 5
       MEDIA_RECORDINGS_DIR: /recordings
       MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 60
       MEDIA_RECORD_MIN_FILE_SIZE_BYTES: 65536
+      MEDIA_ARCHIVE_DIR: /archives
       MEDIA_CLIPS_DIR: /clips
       EVIDENCE_CLIP_MAX_DURATION_SECONDS: 600
       EVIDENCE_CLIP_FFMPEG_TIMEOUT_SECONDS: 180
       EVIDENCE_CLIP_SOURCE_WAIT_SECONDS: 120
+      EVIDENCE_CLIP_GAP_TOLERANCE_SECONDS: 1
+      EVIDENCE_CLIP_OUTPUT_DURATION_TOLERANCE_SECONDS: 2
+      EVIDENCE_CLIP_RETENTION_DAYS: ${EVIDENCE_CLIP_RETENTION_DAYS:-7}
+      EVIDENCE_CLIP_CLEANUP_POLL_SECONDS: ${EVIDENCE_CLIP_CLEANUP_POLL_SECONDS:-3600}
       FFMPEG_BINARY: ffmpeg
+      FFPROBE_BINARY: ffprobe
+      FFPROBE_TIMEOUT_SECONDS: 30
+      INCIDENT_INGEST_TOKEN: ${INCIDENT_INGEST_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
       - ./media/recordings:/recordings:ro
+      - ./media/archives:/archives:ro
       - ./media/clips:/clips
     depends_on:
       - postgres
       - redis
 
+  recording-worker:
+    build:
+      context: ./backend
+    container_name: brave-ai-recording-worker
+    command: python -m app.workers.recording_archiver
+    env_file:
+      - ./backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
+      MEDIA_RECORDINGS_DIR: /recordings
+      MEDIA_RECORD_SEGMENT_DURATION_SECONDS: 60
+      MEDIA_RECORD_MIN_FILE_SIZE_BYTES: 65536
+      MEDIA_ARCHIVE_DIR: /archives
+      MEDIA_HLS_PROBE_BASE_URL: http://mediamtx:8888
+      RECORDING_SESSION_DURATION_SECONDS: ${RECORDING_SESSION_DURATION_SECONDS:-86400}
+      RECORDING_ARCHIVE_RETENTION_DAYS: ${RECORDING_ARCHIVE_RETENTION_DAYS:-7}
+      RECORDING_ARCHIVE_POLL_SECONDS: ${RECORDING_ARCHIVE_POLL_SECONDS:-60}
+      RECORDING_ARCHIVE_GAP_TOLERANCE_SECONDS: ${RECORDING_ARCHIVE_GAP_TOLERANCE_SECONDS:-10}
+      RECORDING_ARCHIVE_OUTPUT_DURATION_TOLERANCE_SECONDS: ${RECORDING_ARCHIVE_OUTPUT_DURATION_TOLERANCE_SECONDS:-10}
+      RECORDING_ARCHIVE_FFMPEG_TIMEOUT_SECONDS: ${RECORDING_ARCHIVE_FFMPEG_TIMEOUT_SECONDS:-21600}
+      RECORDING_ARCHIVE_VIDEO_CRF: ${RECORDING_ARCHIVE_VIDEO_CRF:-30}
+      RECORDING_ARCHIVE_VIDEO_FPS: ${RECORDING_ARCHIVE_VIDEO_FPS:-12}
+      RECORDING_ARCHIVE_VIDEO_PRESET: ${RECORDING_ARCHIVE_VIDEO_PRESET:-veryfast}
+      RECORDING_ARCHIVE_VIDEO_MAX_WIDTH: ${RECORDING_ARCHIVE_VIDEO_MAX_WIDTH:-960}
+      RECORDING_ARCHIVE_VIDEO_MAX_HEIGHT: ${RECORDING_ARCHIVE_VIDEO_MAX_HEIGHT:-540}
+      RECORDING_ARCHIVE_VIDEO_MAX_BITRATE_KBPS: ${RECORDING_ARCHIVE_VIDEO_MAX_BITRATE_KBPS:-900}
+      RECORDING_ARCHIVE_AUDIO_BITRATE_KBPS: ${RECORDING_ARCHIVE_AUDIO_BITRATE_KBPS:-48}
+      FFMPEG_BINARY: ffmpeg
+      FFPROBE_BINARY: ffprobe
+      FFPROBE_TIMEOUT_SECONDS: 30
+    volumes:
+      - ./backend/app:/app/app
+      - ./media/recordings:/recordings:ro
+      - ./media/archives:/archives
+    depends_on:
+      - postgres
+      - mediamtx
+
+  ai-worker:
+    build:
+      context: ./backend
+    container_name: brave-ai-ai-worker
+    command: python -m app.workers.gemini_detection
+    env_file:
+      - ./backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
+      REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-3.1-flash-lite}
+      GEMINI_VIDEO_FPS: ${GEMINI_VIDEO_FPS:-10}
+      AI_DETECTION_ENABLED: ${AI_DETECTION_ENABLED:-false}
+      AI_DETECTION_INTERVAL_SECONDS: ${AI_DETECTION_INTERVAL_SECONDS:-3}
+      AI_DETECTION_CONFIDENCE_THRESHOLD: ${AI_DETECTION_CONFIDENCE_THRESHOLD:-0.75}
+      AI_DETECTION_COOLDOWN_SECONDS: ${AI_DETECTION_COOLDOWN_SECONDS:-30}
+      AI_DETECTION_MAX_CONCURRENCY: ${AI_DETECTION_MAX_CONCURRENCY:-1}
+      AI_DETECTION_RTSP_BASE_URL: rtsp://mediamtx:8554
+      INCIDENT_API_BASE_URL: http://api:8000/api
+      INCIDENT_REQUEST_MAX_ATTEMPTS: ${INCIDENT_REQUEST_MAX_ATTEMPTS:-4}
+      INCIDENT_REQUEST_RETRY_BASE_SECONDS: ${INCIDENT_REQUEST_RETRY_BASE_SECONDS:-0.5}
+      INCIDENT_INGEST_TOKEN: ${INCIDENT_INGEST_TOKEN:-}
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - api
+      - mediamtx
+      - postgres
+      - redis
+
+  ai-evaluator:
+    profiles:
+      - evaluation
+    build:
+      context: ./backend
+    entrypoint:
+      - python
+      - -m
+      - app.evaluation.dataset_runner
+    command:
+      - --dataset-dir
+      - /datasets/brave-ai
+      - --output-dir
+      - /reports
+      - --threshold
+      - "${AI_EVALUATION_THRESHOLD:-0.75}"
+      - --resume
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-3.1-flash-lite}
+      GEMINI_API_BASE_URL: ${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      GEMINI_VIDEO_FPS: ${GEMINI_VIDEO_FPS:-10}
+      GEMINI_INLINE_MAX_BYTES: ${GEMINI_INLINE_MAX_BYTES:-18874368}
+      GEMINI_REQUEST_TIMEOUT_SECONDS: ${GEMINI_REQUEST_TIMEOUT_SECONDS:-45}
+      GEMINI_MAX_RETRIES: ${GEMINI_MAX_RETRIES:-2}
+      AI_EVALUATION_DATASET_DIR: /datasets/brave-ai
+      AI_EVALUATION_REPORT_DIR: /reports
+      AI_EVALUATION_ANNOTATIONS_FILE: ${AI_EVALUATION_ANNOTATIONS_FILE:-}
+      AI_EVALUATION_CONCURRENCY: ${AI_EVALUATION_CONCURRENCY:-1}
+      AI_EVALUATION_THRESHOLD: ${AI_EVALUATION_THRESHOLD:-0.75}
+    volumes:
+      - ./datasets/brave-ai:/datasets/brave-ai:ro
+      - ./docs/ai-evaluation:/reports
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: brave-ai-mediamtx
@@ -41,6 +154,7 @@ services:
     volumes:
       - ./media:/media:ro
       - ./media/recordings:/recordings
+      - brave_hls_data:/hls
     command: /media/mediamtx.yml
 
   postgres:
@@ -66,3 +180,4 @@ services:
 volumes:
   brave_postgres_data:
   brave_redis_data:
+  brave_hls_data:

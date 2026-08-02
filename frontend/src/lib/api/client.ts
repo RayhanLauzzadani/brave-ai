@@ -38,11 +38,12 @@ export async function apiClient<T>(
   const url = `${getApiBaseUrl()}${endpoint}`;
 
   const response = await fetch(url, {
+    ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...options?.headers,
     },
-    ...options,
   });
 
   if (!response.ok) {
@@ -55,6 +56,14 @@ export async function apiClient<T>(
       }
     } catch {
       // Keep the generic message when the server does not return JSON.
+    }
+
+    if (
+      response.status === 401
+      && typeof window !== "undefined"
+      && endpoint !== "/auth/login"
+    ) {
+      window.dispatchEvent(new CustomEvent("brave-ai:unauthorized"));
     }
 
     throw new Error(message);

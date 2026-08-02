@@ -65,6 +65,8 @@ jobs:
           APP_HOST: brave-ai.web.id
           POSTGRES_PASSWORD: ci-postgres-password
           SECRET_KEY: ci-secret-key
+          ADMIN_PASSWORD: ci-admin-password
+          VIEWER_PASSWORD: ci-viewer-password
         run: docker compose -f docker-compose.prod.yml config --quiet
 
       - name: Validate Caddy routing
@@ -107,7 +109,7 @@ jobs:
         run: |
           DEPLOY_USER="${VPS_USER:-root}"
           DEPLOY_DIR="${APP_DIR:-/opt/brave-ai-cctv}"
-          ssh -i ~/.ssh/brave_ai_cctv_deploy "$DEPLOY_USER@$VPS_HOST" "mkdir -p '$DEPLOY_DIR/media/recordings' '$DEPLOY_DIR/media/clips'"
+          ssh -i ~/.ssh/brave_ai_cctv_deploy "$DEPLOY_USER@$VPS_HOST" "mkdir -p '$DEPLOY_DIR/media/recordings' '$DEPLOY_DIR/media/archives' '$DEPLOY_DIR/media/clips'"
           rsync -az --delete \
             --exclude '.git/' \
             --exclude '.github/' \
@@ -116,7 +118,9 @@ jobs:
             --exclude 'frontend/node_modules/' \
             --exclude 'frontend/.next/' \
             --exclude 'media/recordings/' \
+            --exclude 'media/archives/' \
             --exclude 'media/clips/' \
+            --exclude 'backups/' \
             --exclude '.env' \
             --exclude '.env.*' \
             -e "ssh -i ~/.ssh/brave_ai_cctv_deploy" \

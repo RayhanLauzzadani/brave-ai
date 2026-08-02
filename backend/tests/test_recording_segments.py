@@ -1,6 +1,34 @@
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.services import recording_segments
+
+
+def test_segment_duration_does_not_fill_a_missing_recording_gap():
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+
+    assert (
+        recording_segments._segment_duration_seconds(
+            start,
+            start + timedelta(seconds=180),
+            60,
+        )
+        == 60
+    )
+
+
+def test_measured_duration_closes_partial_segment_accurately():
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+
+    assert (
+        recording_segments._segment_duration_seconds(
+            start,
+            start + timedelta(seconds=45),
+            60,
+            measured_duration_seconds=17.4,
+        )
+        == 17
+    )
 
 
 def test_small_recording_fragments_are_ignored(tmp_path, monkeypatch):
@@ -26,7 +54,13 @@ def test_small_recording_fragments_are_ignored(tmp_path, monkeypatch):
     result = recording_segments.list_recording_segments(media_path="camera-test")
 
     assert [segment.file_size for segment in result] == [65_536]
-    assert recording_segments.get_recording_segment_file(result[0].id) == playable_file.resolve()
-    assert recording_segments.get_recording_segment_file(
-        "seg-camera-test-2026-07-11-09-00-00-000000-mp4"
-    ) is None
+    assert (
+        recording_segments.get_recording_segment_file(result[0].id)
+        == playable_file.resolve()
+    )
+    assert (
+        recording_segments.get_recording_segment_file(
+            "seg-camera-test-2026-07-11-09-00-00-000000-mp4"
+        )
+        is None
+    )
