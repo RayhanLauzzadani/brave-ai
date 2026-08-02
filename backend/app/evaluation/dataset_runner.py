@@ -10,10 +10,11 @@ import math
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 
@@ -30,7 +31,6 @@ from app.services.gemini_classifier import (
     CLASSIFICATION_PROMPT,
     GeminiVideoClassifier,
 )
-
 
 DATASET_SCHEMA_VERSION = "ai-evaluation.v2"
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".avi", ".webm"})
@@ -736,7 +736,8 @@ async def evaluate_segment(
                 video_bytes = await asyncio.to_thread(clip_path.read_bytes)
                 gemini_requested = True
                 classification = await classifier.classify(video_bytes)
-        except Exception as error:
+        # A single corrupt clip or provider failure must not abort the benchmark.
+        except Exception as error:  # noqa: BLE001
             return EvaluationResult(
                 sample_id=segment.sample_id,
                 cache_key=segment.cache_key,
@@ -1208,8 +1209,10 @@ def render_latest_summary(summary: dict[str, Any]) -> str:
         f"- Recall: **{format_percent(metrics['recall'])}**",
         f"- F1-score: **{format_percent(metrics['f1'])}**",
         "",
-        "Detail lengkap tersimpan di folder run lokal dan tidak di-commit karena "
-        "berisi nama file serta observasi video.",
+        (
+            "Detail lengkap tersimpan di folder run lokal dan tidak di-commit karena "
+            "berisi nama file serta observasi video."
+        ),
     ]
     if summary.get("warnings"):
         lines.extend(["", "## Catatan", ""])
@@ -1313,7 +1316,7 @@ def safe(value: Any) -> str:
     )
 
 
-def format_percent(value: float | int | None) -> str:
+def format_percent(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{float(value) * 100:.2f}%"

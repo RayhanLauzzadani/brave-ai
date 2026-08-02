@@ -8,8 +8,8 @@ import pytest
 from app.core.config import Settings
 from app.evaluation import dataset_runner
 from app.evaluation.dataset_runner import (
-    DatasetSource,
     DatasetRunnerError,
+    DatasetSource,
     run_evaluation,
 )
 from app.services.gemini_classifier import GeminiClassification

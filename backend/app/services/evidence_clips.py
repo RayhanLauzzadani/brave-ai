@@ -8,20 +8,20 @@ from pathlib import Path
 from app.core.config import Settings, get_settings
 from app.db.session import AsyncSessionLocal
 from app.repositories.cameras import list_cameras, to_camera_schema
+from app.repositories.recordings import get_recording_model
 from app.repositories.reporting import (
     delete_expired_evidence_clip_models,
     get_evidence_clip,
     list_pending_evidence_clip_ids,
     update_evidence_clip_status,
 )
-from app.repositories.recordings import get_recording_model
 from app.schemas import Camera, EvidenceClipResponse, RecordingSegment
-from app.services.recording_archiver import resolve_archive_file
 from app.services.media_validation import (
     MediaValidationError,
     covers_time_range,
     validate_rendered_video,
 )
+from app.services.recording_archiver import resolve_archive_file
 from app.services.recording_segments import (
     get_recording_segment_file,
     list_recording_segments,

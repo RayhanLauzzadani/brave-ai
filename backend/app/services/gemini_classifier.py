@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import Settings, get_settings
 
-
 CLASSIFICATION_PROMPT = """
 Anda adalah sistem forensik video CCTV sekolah yang berspesialisasi dalam mendeteksi agresi fisik dan bullying pada potongan klip pendek (3 detik).
 

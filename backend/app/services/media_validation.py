@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 
 class MediaValidationError(RuntimeError):

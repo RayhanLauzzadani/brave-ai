@@ -59,4 +59,3 @@ async def logout(response: Response) -> None:
         samesite="lax",
         path="/",
     )
-    return None

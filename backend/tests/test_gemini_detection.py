@@ -8,9 +8,9 @@ from app.core.config import Settings
 from app.schemas import Camera, IncidentEventCreate
 from app.services.gemini_classifier import GeminiClassification
 from app.workers.gemini_detection import (
-    CapturedClip,
     _LOCAL_INCIDENT_COOLDOWNS,
     _LOCAL_INCIDENT_PENDING,
+    CapturedClip,
     _claim_incident_delivery,
     _complete_incident_delivery,
     _post_incident,

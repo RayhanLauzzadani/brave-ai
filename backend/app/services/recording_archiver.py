@@ -20,12 +20,12 @@ from app.repositories.recordings import (
     reserve_recording_archive,
 )
 from app.schemas import Camera, RecordingSegment
+from app.services.camera_connections import probe_camera_connection
 from app.services.media_validation import (
     MediaValidationError,
     covers_time_range,
     validate_rendered_video,
 )
-from app.services.camera_connections import probe_camera_connection
 from app.services.recording_segments import list_recording_segments
 
 logger = logging.getLogger("brave-ai.recording-archiver")

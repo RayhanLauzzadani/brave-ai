@@ -5,7 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser
 from app.db.session import get_db_session
-from app.repositories.reporting import list_alerts, mark_alert_read, mark_all_alerts_read
+from app.repositories.reporting import (
+    list_alerts,
+    mark_alert_read,
+    mark_all_alerts_read,
+)
 from app.schemas import Alert, MarkReadRequest
 
 router = APIRouter()
