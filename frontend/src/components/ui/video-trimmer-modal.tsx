@@ -72,6 +72,8 @@ export function VideoTrimmerModal({
   const [trimEnd, setTrimEnd] = useState(initialSession.trimEnd);
   const [currentTime, setCurrentTime] = useState(initialSession.trimStart);
   const currentTimeRef = useRef(initialSession.trimStart);
+  const pendingSeekRef = useRef<number | null>(null);
+  const resumeAfterSeekRef = useRef(false);
 
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
@@ -142,6 +144,8 @@ export function VideoTrimmerModal({
       sessionInput.eventTime,
     );
     currentTimeRef.current = session.trimStart;
+    pendingSeekRef.current = session.trimStart;
+    resumeAfterSeekRef.current = false;
     dragStateRef.current = null;
     document.body.style.overflow = "hidden";
 
@@ -167,16 +171,33 @@ export function VideoTrimmerModal({
     return () => {
       window.clearTimeout(timeout);
       video?.pause();
+      pendingSeekRef.current = null;
+      resumeAfterSeekRef.current = false;
       dragStateRef.current = null;
       document.body.style.overflow = "";
     };
   }, [isOpen, sourceKey]);
 
   const setPreviewTime = useCallback((value: number) => {
-    const bounded = Math.max(0, Math.min(value, totalDuration));
+    const video = previewVideoRef.current;
+    const requested = Math.max(0, Math.min(value, totalDuration));
+    const bounded = video && video.readyState >= HTMLMediaElement.HAVE_METADATA
+      ? getBoundedVideoTime(video, requested)
+      : requested;
     currentTimeRef.current = bounded;
     setCurrentTime(bounded);
-    if (previewVideoRef.current) seekVideo(previewVideoRef.current, bounded);
+    if (!video) {
+      pendingSeekRef.current = null;
+      return;
+    }
+
+    pendingSeekRef.current = bounded;
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    if (Math.abs(video.currentTime - bounded) <= 0.02) {
+      pendingSeekRef.current = null;
+      return;
+    }
+    seekVideo(video, bounded);
   }, [totalDuration]);
 
   const updateHandleValue = useCallback((handle: TrimHandle, value: number) => {
@@ -226,6 +247,7 @@ export function VideoTrimmerModal({
 
     const video = previewVideoRef.current;
     const resumeAfterDrag = handle === "scrubber" && Boolean(video && !video.paused);
+    resumeAfterSeekRef.current = false;
     video?.pause();
     setIsPlaying(false);
 
@@ -260,12 +282,13 @@ export function VideoTrimmerModal({
     dragStateRef.current = null;
     setActiveHandle(null);
 
-    if (
-      dragState.resumeAfterDrag
-      && currentTimeRef.current < trimEnd - 0.05
-      && previewVideoRef.current
-    ) {
-      void previewVideoRef.current.play().catch(() => setIsPlaying(false));
+    const video = previewVideoRef.current;
+    if (dragState.resumeAfterDrag && currentTimeRef.current < trimEnd - 0.05 && video) {
+      if (pendingSeekRef.current !== null || video.seeking) {
+        resumeAfterSeekRef.current = true;
+      } else {
+        void video.play().catch(() => setIsPlaying(false));
+      }
     }
   }, [trimEnd]);
 
@@ -282,7 +305,10 @@ export function VideoTrimmerModal({
       currentTimeRef.current < trimStart
       || currentTimeRef.current >= trimEnd - 0.05
     ) {
+      resumeAfterSeekRef.current = true;
       setPreviewTime(trimStart);
+      if (pendingSeekRef.current !== null || video.seeking) return;
+      resumeAfterSeekRef.current = false;
     }
 
     try {
@@ -435,13 +461,18 @@ export function VideoTrimmerModal({
                   muted
                   playsInline
                   preload="metadata"
-                  onLoadedMetadata={(event) => {
-                    seekVideo(event.currentTarget, currentTimeRef.current);
-                  }}
+                  onLoadedMetadata={() => setPreviewTime(currentTimeRef.current)}
                   onTimeUpdate={(event) => {
                     if (dragStateRef.current) return;
 
                     const video = event.currentTarget;
+                    const pendingSeek = pendingSeekRef.current;
+                    if (pendingSeek !== null) {
+                      if (video.seeking || Math.abs(video.currentTime - pendingSeek) > 0.35) {
+                        return;
+                      }
+                      pendingSeekRef.current = null;
+                    }
                     const nextTime = Math.max(
                       trimStart,
                       Math.min(totalDuration, video.currentTime),
@@ -451,6 +482,32 @@ export function VideoTrimmerModal({
                     if (!video.paused && nextTime >= trimEnd - 0.05) {
                       video.pause();
                       setPreviewTime(trimEnd);
+                    }
+                  }}
+                  onSeeked={(event) => {
+                    const video = event.currentTarget;
+                    const pendingSeek = pendingSeekRef.current;
+                    if (
+                      pendingSeek !== null
+                      && Math.abs(video.currentTime - pendingSeek) > 0.35
+                    ) {
+                      seekVideo(video, pendingSeek);
+                      return;
+                    }
+
+                    pendingSeekRef.current = null;
+                    const nextTime = Math.max(
+                      trimStart,
+                      Math.min(totalDuration, video.currentTime),
+                    );
+                    currentTimeRef.current = nextTime;
+                    setCurrentTime(nextTime);
+
+                    if (resumeAfterSeekRef.current) {
+                      resumeAfterSeekRef.current = false;
+                      if (nextTime < trimEnd - 0.05) {
+                        void video.play().catch(() => setIsPlaying(false));
+                      }
                     }
                   }}
                   onPlay={() => setIsPlaying(true)}
@@ -691,13 +748,17 @@ function getInitialTrimSession(
 
 function seekVideo(video: HTMLVideoElement, seconds: number) {
   if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
-  const mediaDuration = Number.isFinite(video.duration)
-    ? Math.max(0, video.duration)
-    : Math.max(0, seconds);
-  const bounded = Math.max(0, Math.min(seconds, mediaDuration));
+  const bounded = getBoundedVideoTime(video, seconds);
   if (Math.abs(video.currentTime - bounded) > 0.02) {
     video.currentTime = bounded;
   }
+}
+
+function getBoundedVideoTime(video: HTMLVideoElement, seconds: number) {
+  const mediaDuration = Number.isFinite(video.duration)
+    ? Math.max(0, video.duration)
+    : Math.max(0, seconds);
+  return Math.max(0, Math.min(seconds, mediaDuration));
 }
 
 function formatClipDuration(seconds: number) {

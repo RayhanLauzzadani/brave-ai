@@ -50,6 +50,8 @@ def test_capture_command_reads_camera_from_mediamtx():
     )
     assert command[command.index("-t") + 1] == "3"
     assert command[command.index("-vf") + 1] == "fps=7.5,scale=640:-2"
+    assert command[command.index("-timeout") + 1] == "8000000"
+    assert "-rw_timeout" not in command
 
 
 def test_only_confident_bullying_creates_incident():

@@ -5,7 +5,7 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -33,11 +33,6 @@ class CapturedClip:
     camera: Camera
     path: Path
     occurred_at: datetime
-    processed: asyncio.Event = field(
-        default_factory=asyncio.Event,
-        compare=False,
-        repr=False,
-    )
 
 
 @dataclass(frozen=True)
@@ -149,7 +144,6 @@ async def _produce_camera(
                 )
             await queue.put(item)
             clip_path = None
-            await item.processed.wait()
         except asyncio.CancelledError:
             if clip_path:
                 _discard_clip(clip_path)
@@ -229,7 +223,7 @@ def build_capture_command(
         "error",
         "-rtsp_transport",
         "tcp",
-        "-rw_timeout",
+        "-timeout",
         "8000000",
         "-i",
         f"{base_url}/{encoded_path}",
@@ -278,7 +272,6 @@ async def _consume_clips(
             logger.exception("Klip AI kamera %s gagal diproses.", clip.camera.id)
         finally:
             _discard_clip(clip.path)
-            clip.processed.set()
             queue.task_done()
 
 
@@ -291,13 +284,13 @@ async def _classify_and_report(
 ) -> None:
     video_bytes = await asyncio.to_thread(clip.path.read_bytes)
     result = await classifier.classify(video_bytes)
+    logger.info(
+        "Gemini kamera %s: %s (%.2f).",
+        clip.camera.name,
+        result.prediction,
+        result.confidence,
+    )
     if not should_emit_prediction(result, settings.ai_detection_confidence_threshold):
-        logger.debug(
-            "Gemini kamera %s: %s (%.2f)",
-            clip.camera.name,
-            result.prediction,
-            result.confidence,
-        )
         return
 
     lease = await _claim_incident_delivery(redis_client, clip.camera.id, settings)
@@ -557,7 +550,6 @@ def _discard_pending_queue(queue: asyncio.Queue[CapturedClip]) -> None:
     while not queue.empty():
         clip = queue.get_nowait()
         _discard_clip(clip.path)
-        clip.processed.set()
         queue.task_done()
 
 

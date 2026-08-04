@@ -4,7 +4,9 @@ services:
       context: ./backend
     container_name: brave-ai-api
     env_file:
-      - ./backend/.env.example
+      - path: ./backend/.env.example
+      - path: ./backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
       REDIS_URL: redis://redis:6379/0
@@ -26,7 +28,6 @@ services:
       FFMPEG_BINARY: ffmpeg
       FFPROBE_BINARY: ffprobe
       FFPROBE_TIMEOUT_SECONDS: 30
-      INCIDENT_INGEST_TOKEN: ${INCIDENT_INGEST_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
@@ -44,7 +45,9 @@ services:
     container_name: brave-ai-recording-worker
     command: python -m app.workers.recording_archiver
     env_file:
-      - ./backend/.env.example
+      - path: ./backend/.env.example
+      - path: ./backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
       MEDIA_RECORDINGS_DIR: /recordings
@@ -82,23 +85,14 @@ services:
     container_name: brave-ai-ai-worker
     command: python -m app.workers.gemini_detection
     env_file:
-      - ./backend/.env.example
+      - path: ./backend/.env.example
+      - path: ./backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://brave:brave_password@postgres:5432/brave_ai
       REDIS_URL: redis://redis:6379/0
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-3.1-flash-lite}
-      GEMINI_VIDEO_FPS: ${GEMINI_VIDEO_FPS:-10}
-      AI_DETECTION_ENABLED: ${AI_DETECTION_ENABLED:-false}
-      AI_DETECTION_INTERVAL_SECONDS: ${AI_DETECTION_INTERVAL_SECONDS:-3}
-      AI_DETECTION_CONFIDENCE_THRESHOLD: ${AI_DETECTION_CONFIDENCE_THRESHOLD:-0.75}
-      AI_DETECTION_COOLDOWN_SECONDS: ${AI_DETECTION_COOLDOWN_SECONDS:-30}
-      AI_DETECTION_MAX_CONCURRENCY: ${AI_DETECTION_MAX_CONCURRENCY:-1}
       AI_DETECTION_RTSP_BASE_URL: rtsp://mediamtx:8554
       INCIDENT_API_BASE_URL: http://api:8000/api
-      INCIDENT_REQUEST_MAX_ATTEMPTS: ${INCIDENT_REQUEST_MAX_ATTEMPTS:-4}
-      INCIDENT_REQUEST_RETRY_BASE_SECONDS: ${INCIDENT_REQUEST_RETRY_BASE_SECONDS:-0.5}
-      INCIDENT_INGEST_TOKEN: ${INCIDENT_INGEST_TOKEN:-}
     volumes:
       - ./backend/app:/app/app
     depends_on:
