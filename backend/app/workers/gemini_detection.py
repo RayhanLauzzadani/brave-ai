@@ -58,8 +58,7 @@ async def run_detection_worker(settings: Settings | None = None) -> None:
         )
         await asyncio.Event().wait()
 
-    if not settings.gemini_api_key:
-        raise RuntimeError("AI_DETECTION_ENABLED=true tetapi GEMINI_API_KEY kosong.")
+    validate_detection_settings(settings)
 
     classifier = GeminiVideoClassifier(settings=settings)
     queue: asyncio.Queue[CapturedClip] = asyncio.Queue(
@@ -109,6 +108,18 @@ async def run_detection_worker(settings: Settings | None = None) -> None:
         _discard_pending_queue(queue)
         await event_client.aclose()
         await redis_client.aclose()
+
+
+def validate_detection_settings(settings: Settings) -> None:
+    if not settings.gemini_api_key:
+        raise RuntimeError("AI_DETECTION_ENABLED=true tetapi GEMINI_API_KEY kosong.")
+    if (
+        settings.environment.strip().lower() == "production"
+        and not settings.incident_ingest_token.strip()
+    ):
+        raise RuntimeError(
+            "AI_DETECTION_ENABLED=true tetapi INCIDENT_INGEST_TOKEN kosong."
+        )
 
 
 async def _load_detection_cameras() -> list[Camera]:

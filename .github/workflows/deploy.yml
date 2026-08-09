@@ -138,6 +138,16 @@ jobs:
             set -e
             cd '$DEPLOY_DIR'
             test -f .env.production
+            if grep -Eiq '^AI_DETECTION_ENABLED=(true|1|yes|on)[[:space:]]*$' .env.production; then
+              grep -Eq '^GEMINI_API_KEY=.+$' .env.production || {
+                echo 'GEMINI_API_KEY wajib diisi saat AI detection aktif.' >&2
+                exit 1
+              }
+              grep -Eq '^INCIDENT_INGEST_TOKEN=.+$' .env.production || {
+                echo 'INCIDENT_INGEST_TOKEN wajib diisi saat AI detection aktif.' >&2
+                exit 1
+              }
+            fi
             docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
             docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
             docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build --remove-orphans

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import pytest
 
 from app.core.config import Settings
 from app.schemas import Camera, IncidentEventCreate
@@ -19,6 +20,7 @@ from app.workers.gemini_detection import (
     build_incident_event_id,
     severity_for_confidence,
     should_emit_prediction,
+    validate_detection_settings,
 )
 
 
@@ -68,6 +70,22 @@ def test_only_confident_bullying_creates_incident():
     assert severity_for_confidence(0.84) == "medium"
     assert severity_for_confidence(0.9) == "high"
     assert severity_for_confidence(0.97) == "critical"
+
+
+def test_production_detection_requires_incident_ingest_token() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        ai_detection_enabled=True,
+        gemini_api_key="test-key",
+        incident_ingest_token="",
+    )
+
+    with pytest.raises(RuntimeError, match="INCIDENT_INGEST_TOKEN kosong"):
+        validate_detection_settings(settings)
+
+    settings.incident_ingest_token = "test-ingest-token"
+    validate_detection_settings(settings)
 
 
 def test_incident_event_id_is_stable_for_the_same_clip() -> None:
