@@ -55,6 +55,7 @@ import {
 import {
   createEvidenceClip,
   downloadEvidenceClip,
+  getRecordings,
   getRecordingSegments,
   waitForEvidenceClip,
 } from "@/lib/api/recordings";
@@ -87,6 +88,7 @@ import {
 type CameraAvailability = "checking" | "live" | "offline" | "waiting";
 
 const LIVE_PLAYBACK_WINDOW_SECONDS = 10 * 60;
+const INCIDENT_REVIEW_WINDOW_SECONDS = 60;
 const DVR_LIVE_EDGE_THRESHOLD_SECONDS = 3;
 const DVR_PLAYBACK_START_GUARD_MS = 250;
 // HLS publishes its live edge in segment-sized steps. Replay UI therefore
@@ -124,6 +126,7 @@ export default function LiveCameraDashboard() {
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const selectedCameraIdRef = useRef<string | null>(selectedCameraId);
   const focusedQueryLogRef = useRef<string | null>(null);
+  const incidentPlaybackRequestRef = useRef(0);
   const [cameras, setCameras] = useState<CameraType[]>([]);
   const [logs, setLogs] = useState<BullyingLog[]>([]);
   const [availability, setAvailability] = useState<Record<string, CameraAvailability>>({});
@@ -676,13 +679,18 @@ export default function LiveCameraDashboard() {
   const openHistoricalIncidentPlayback = useCallback(async (log: BullyingLog) => {
     if (!selectedCamera || selectedCamera.id !== log.cameraId) return;
 
+    const requestId = incidentPlaybackRequestRef.current + 1;
+    incidentPlaybackRequestRef.current = requestId;
+    const isLatestRequest = () => incidentPlaybackRequestRef.current === requestId;
+
     const incidentAt = new Date(log.timestamp);
     if (Number.isNaN(incidentAt.getTime())) {
+      setIsLoadingClip(false);
       setActionMessage("Waktu indikasi tidak valid.");
       return;
     }
 
-    const reviewHalfWindowMs = (LIVE_PLAYBACK_WINDOW_SECONDS * 1000) / 2;
+    const reviewHalfWindowMs = (INCIDENT_REVIEW_WINDOW_SECONDS * 1000) / 2;
     const rangeStart = new Date(incidentAt.getTime() - reviewHalfWindowMs);
     const rangeEnd = new Date(
       Math.min(Date.now(), incidentAt.getTime() + reviewHalfWindowMs),
@@ -691,6 +699,40 @@ export default function LiveCameraDashboard() {
     setIsLoadingClip(true);
     setActionMessage("Memuat rekaman di sekitar waktu indikasi...");
     try {
+      if (
+        selectedCameraAvailability === "offline"
+        || selectedCameraAvailability === "waiting"
+      ) {
+        const archivedRecordings = await getRecordings({
+          cameraId: selectedCamera.id,
+          dateFrom: rangeStart.toISOString(),
+          dateTo: rangeEnd.toISOString(),
+          limit: 20,
+        }).catch(() => []);
+        if (!isLatestRequest()) return;
+
+        const archivedIncident = archivedRecordings.find((recording) => {
+          const startTime = new Date(recording.startTime).getTime();
+          const endTime = new Date(recording.endTime).getTime();
+          return (
+            recording.storageStatus === "available"
+            && Boolean(recording.playbackUrl)
+            && startTime <= incidentAt.getTime()
+            && incidentAt.getTime() <= endTime
+          );
+        });
+
+        if (archivedIncident) {
+          const params = new URLSearchParams({
+            cameraId: log.cameraId,
+            logId: log.id,
+            at: log.timestamp,
+          });
+          router.push(`/rekaman?${params.toString()}`);
+          return;
+        }
+      }
+
       const [segments, spans] = await Promise.all([
         getRecordingSegments({
           cameraId: selectedCamera.id,
@@ -704,12 +746,15 @@ export default function LiveCameraDashboard() {
             }).catch(() => [])
           : Promise.resolve([]),
       ]);
+      if (!isLatestRequest()) return;
+
       const recordings = recordingSegmentsToLiveRecords(segments, selectedCamera);
       const reviewRecord = createLivePlaybackRecord(
         selectedCamera,
         recordings,
         spans,
         log.timestamp,
+        INCIDENT_REVIEW_WINDOW_SECONDS,
       );
 
       if (!reviewRecord) {
@@ -724,19 +769,21 @@ export default function LiveCameraDashboard() {
       setIsClipViewerOpen(true);
       setActionMessage("Rekaman indikasi berhasil dimuat.");
     } catch (error) {
+      if (!isLatestRequest()) return;
       setActionMessage(
         error instanceof Error
           ? error.message
           : "Rekaman indikasi belum dapat dimuat.",
       );
     } finally {
-      setIsLoadingClip(false);
+      if (isLatestRequest()) setIsLoadingClip(false);
     }
-  }, [selectedCamera]);
+  }, [router, selectedCamera, selectedCameraAvailability]);
 
   useEffect(() => {
     if (!queryLogId || focusedQueryLogRef.current === queryLogId) return;
     if (!queriedLog || selectedCamera?.id !== queriedLog.cameraId) return;
+    if (selectedCameraAvailability === "checking") return;
 
     const marker = timelineIncidentMarkers.find((item) => item.id === queryLogId);
     if (!marker) {
@@ -766,6 +813,7 @@ export default function LiveCameraDashboard() {
     queriedLog,
     queryLogId,
     selectedCamera,
+    selectedCameraAvailability,
     timelineIncidentMarkers,
   ]);
 
@@ -998,11 +1046,30 @@ export default function LiveCameraDashboard() {
     if (alert.cameraId) params.set("cameraId", alert.cameraId);
     if (logId) params.set("logId", logId);
     params.set("at", alert.timestamp);
+
+    const matchingLog = logId
+      ? logs.find((log) => log.id === logId) ?? null
+      : null;
+    if (
+      matchingLog
+      && selectedCamera?.id === matchingLog.cameraId
+      && selectedCameraAvailability !== "checking"
+    ) {
+      focusedQueryLogRef.current = matchingLog.id;
+      void openHistoricalIncidentPlayback(matchingLog);
+    }
     router.push("/live-view?" + params.toString());
   };
 
   const handleOpenLog = (log: BullyingLog) => {
     setSelectedCameraId(log.cameraId);
+    if (
+      selectedCamera?.id === log.cameraId
+      && selectedCameraAvailability !== "checking"
+    ) {
+      focusedQueryLogRef.current = log.id;
+      void openHistoricalIncidentPlayback(log);
+    }
     router.push(
       `/live-view?cameraId=${encodeURIComponent(log.cameraId)}&logId=${encodeURIComponent(log.id)}&at=${encodeURIComponent(log.timestamp)}`,
     );
@@ -1955,6 +2022,7 @@ export default function LiveCameraDashboard() {
         <VideoTrimmerModal
           isOpen={isClipViewerOpen}
           onClose={() => {
+            incidentPlaybackRequestRef.current += 1;
             setIsClipViewerOpen(false);
             setClipEventLog(null);
           }}
@@ -2024,6 +2092,7 @@ function createLivePlaybackRecord(
   recordings: Recording[],
   playbackSpans: GatewayPlaybackSpan[] = [],
   focusTimestamp?: string,
+  playbackWindowSeconds = LIVE_PLAYBACK_WINDOW_SECONDS,
 ): Recording | null {
   const available = recordings
     .filter(
@@ -2038,7 +2107,8 @@ function createLivePlaybackRecord(
   const latest = available[available.length - 1];
   const focusTimeValue = focusTimestamp ? new Date(focusTimestamp).getTime() : Number.NaN;
   const focusTime = Number.isFinite(focusTimeValue) ? focusTimeValue : null;
-  const focusWindowHalfMs = (LIVE_PLAYBACK_WINDOW_SECONDS * 1000) / 2;
+  const safePlaybackWindowSeconds = Math.max(1, playbackWindowSeconds);
+  const focusWindowHalfMs = (safePlaybackWindowSeconds * 1000) / 2;
   const recordingAtFocus = focusTime === null
     ? null
     : available.find((recording) => {
@@ -2047,6 +2117,13 @@ function createLivePlaybackRecord(
         return startTime <= focusTime && focusTime <= endTime;
       }) ?? null;
   const recordTemplate = recordingAtFocus ?? latest;
+
+  // Finalized one-minute segments support HTTP range seeking and are much
+  // smoother for incident review than MediaMTX's progressively generated fMP4.
+  if (focusTime !== null && recordingAtFocus?.playbackUrl) {
+    return recordingAtFocus;
+  }
+
   const normalizedSpans = playbackSpans
     .map((span) => {
       const startTime = new Date(span.start).getTime();
@@ -2080,7 +2157,7 @@ function createLivePlaybackRecord(
     const playbackStartTime = Math.max(
       playbackSpan.startTime + DVR_PLAYBACK_START_GUARD_MS,
       focusTime === null
-        ? recordedEndTime - LIVE_PLAYBACK_WINDOW_SECONDS * 1000
+        ? recordedEndTime - safePlaybackWindowSeconds * 1000
         : focusTime - focusWindowHalfMs,
     );
     if (recordedEndTime > playbackStartTime) {
@@ -2112,7 +2189,7 @@ function createLivePlaybackRecord(
   if (recordedEndTime <= templateStart.getTime()) return recordTemplate;
 
   const windowStartLimit = focusTime === null
-    ? recordedEndTime - LIVE_PLAYBACK_WINDOW_SECONDS * 1000
+    ? recordedEndTime - safePlaybackWindowSeconds * 1000
     : focusTime - focusWindowHalfMs;
   const firstInWindow = available.find((recording) => {
     const startTime = new Date(recording.startTime).getTime();

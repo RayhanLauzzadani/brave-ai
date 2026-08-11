@@ -90,7 +90,7 @@ def test_viewer_cannot_mutate_camera_or_create_clip() -> None:
             assert response.status_code == 403, path
 
 
-def test_realtime_alert_is_sent_only_to_target_role() -> None:
+def test_realtime_incident_alert_is_sent_to_admin_and_viewer() -> None:
     manager = AlertConnectionManager()
     viewer_socket = FakeWebSocket()
     admin_socket = FakeWebSocket()
@@ -106,14 +106,15 @@ def test_realtime_alert_is_sent_only_to_target_role() -> None:
             user_id="admin-1",
             role="admin",
         )
-        await manager.broadcast_alert(make_alert(), audience="viewer")
+        await manager.broadcast_alert(make_alert(), audience="all")
 
     asyncio.run(scenario())
 
     assert viewer_socket.accepted is True
     assert len(viewer_socket.messages) == 1
     assert viewer_socket.messages[0]["id"] == "alert-test"
-    assert admin_socket.messages == []
+    assert len(admin_socket.messages) == 1
+    assert admin_socket.messages[0]["id"] == "alert-test"
 
 
 def make_alert() -> Alert:

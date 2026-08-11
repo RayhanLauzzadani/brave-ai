@@ -45,7 +45,7 @@ def make_alert() -> AlertModel:
         message="Perlu diperiksa",
         timestamp=now,
         is_read=False,
-        audience="viewer",
+        audience="all",
         metadata_json={"logId": "log-test"},
         created_at=now,
         updated_at=now,
@@ -177,6 +177,10 @@ def test_incident_event_id_is_idempotent() -> None:
     assert second.log.id == first.log.id
     assert second.alert.id == first.alert.id
     assert len(session.values) == 2
+    stored_alert = next(
+        value for value in session.values.values() if isinstance(value, AlertModel)
+    )
+    assert stored_alert.audience == "all"
 
 
 def test_incident_event_rejects_non_physical_bullying() -> None:

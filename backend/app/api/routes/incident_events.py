@@ -42,5 +42,5 @@ async def ingest_incident_event(
         )
     result, created = await create_incident_event(session, payload)
     if created:
-        await alert_manager.broadcast_alert(result.alert, audience="viewer")
+        await alert_manager.broadcast_alert(result.alert, audience="all")
     return result

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Calendar as CalendarIcon,
@@ -64,6 +65,21 @@ type TimelineMarker = {
 };
 
 export default function RekamanPage() {
+  return (
+    <Suspense fallback={<RekamanPageFallback />}>
+      <RekamanPageContent />
+    </Suspense>
+  );
+}
+
+function RekamanPageContent() {
+  const searchParams = useSearchParams();
+  const queryCameraId = searchParams.get("cameraId");
+  const queryLogId = searchParams.get("logId");
+  const queryIncidentAt = searchParams.get("at");
+  const queryIncidentKey = queryLogId
+    ? `${queryLogId}|${queryIncidentAt ?? ""}`
+    : null;
   const user = useAuthStore((state) => state.user);
   const canCreateClips = user?.role === "admin";
   const [records, setRecords] = useState<Recording[]>([]);
@@ -73,20 +89,34 @@ export default function RekamanPage() {
   const [selectedOffsetSeconds, setSelectedOffsetSeconds] = useState(0);
   const [isTrimmerOpen, setIsTrimmerOpen] = useState(false);
   const [fullscreenRecord, setFullscreenRecord] = useState<Recording | null>(null);
-  const [date, setDate] = useState<Date | undefined>(() => new Date());
+  const [date, setDate] = useState<Date | undefined>(() => {
+    const incidentDate = queryIncidentAt ? new Date(queryIncidentAt) : null;
+    return incidentDate && !Number.isNaN(incidentDate.getTime())
+      ? incidentDate
+      : new Date();
+  });
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isLokasiOpen, setIsLokasiOpen] = useState(false);
   const [isKameraOpen, setIsKameraOpen] = useState(false);
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [selectedLokasi, setSelectedLokasi] = useState("all");
-  const [selectedKamera, setSelectedKamera] = useState("all");
+  const [selectedKamera, setSelectedKamera] = useState(queryCameraId ?? "all");
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const playbackVideoRef = useRef<HTMLVideoElement>(null);
+  const fullscreenVideoRef = useRef<HTMLVideoElement>(null);
+  const playbackPositionsRef = useRef<Map<string, number>>(new Map());
+  const handledIncidentRef = useRef<string | null>(null);
+  const pendingIncidentRef = useRef<{
+    key: string;
+    recordId: string;
+    offsetSeconds: number;
+  } | null>(null);
   const [isPlaybackPlaying, setIsPlaybackPlaying] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
+  const [fullscreenStartOffset, setFullscreenStartOffset] = useState(0);
 
   useEffect(() => {
     if (!fullscreenRecord) return;
@@ -104,6 +134,22 @@ export default function RekamanPage() {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [fullscreenRecord]);
+
+  useEffect(() => {
+    if (!queryIncidentKey) return;
+    const timeout = window.setTimeout(() => {
+      if (queryCameraId) setSelectedKamera(queryCameraId);
+
+      if (queryIncidentAt) {
+        const incidentDate = new Date(queryIncidentAt);
+        if (!Number.isNaN(incidentDate.getTime())) {
+          setDate(incidentDate);
+        }
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [queryCameraId, queryIncidentAt, queryIncidentKey]);
 
   const dateRange = useMemo(() => getSevenDayRange(date ?? new Date()), [date]);
 
@@ -199,38 +245,107 @@ export default function RekamanPage() {
         return;
       }
       if (selectedRecord.id !== selectedRecordId) {
+        const resumeAt = playbackPositionsRef.current.get(selectedRecord.id) ?? 0;
         setSelectedRecordId(selectedRecord.id);
-        setSelectedOffsetSeconds(0);
+        setSelectedOffsetSeconds(resumeAt);
       }
     }, 0);
 
     return () => window.clearTimeout(timeout);
   }, [selectedRecord, selectedRecordId]);
 
-  const incidentMarkers = useMemo(() => {
-    if (!selectedRecord) return [];
-    const start = new Date(selectedRecord.startTime).getTime();
-    const end = new Date(selectedRecord.endTime).getTime();
+  useEffect(() => {
+    if (!queryIncidentKey || handledIncidentRef.current === queryIncidentKey) {
+      return;
+    }
 
-    return logs
-      .filter((log) => {
-        const timestamp = new Date(log.timestamp).getTime();
+    const timeout = window.setTimeout(() => {
+      const queriedLog = queryLogId
+        ? logs.find((log) => log.id === queryLogId) ?? null
+        : null;
+      const incidentTimestamp = queriedLog?.timestamp ?? queryIncidentAt;
+      const incidentCameraId = queriedLog?.cameraId ?? queryCameraId;
+      if (!incidentTimestamp || !incidentCameraId) return;
+
+      const incidentAt = new Date(incidentTimestamp).getTime();
+      if (!Number.isFinite(incidentAt)) return;
+
+      const matchingRecord = visibleRecords.find((record) => {
+        const startTime = new Date(record.startTime).getTime();
+        const endTime = new Date(record.endTime).getTime();
         return (
-          log.cameraId === selectedRecord.cameraId &&
-          timestamp >= start &&
-          timestamp <= end
+          record.cameraId === incidentCameraId
+          && record.storageStatus === "available"
+          && Boolean(record.playbackUrl)
+          && startTime <= incidentAt
+          && incidentAt <= endTime
         );
-      })
-      .map((log) => ({
-        id: log.id,
-        offsetSeconds: Math.max(
-          0,
-          (toDate(log.timestamp).getTime() - start) / 1000,
-        ),
-        label: formatRecordMoment(log.timestamp),
-        description: log.title,
-      })) satisfies TimelineMarker[];
+      });
+
+      if (!matchingRecord) {
+        setActionMessage(
+          "Rekaman indikasi sedang diproses. Halaman akan memeriksa kembali secara otomatis.",
+        );
+        return;
+      }
+
+      const recordStart = new Date(matchingRecord.startTime).getTime();
+      const offsetSeconds = Math.min(
+        Math.max(0, (incidentAt - recordStart) / 1000),
+        Math.max(1, matchingRecord.duration),
+      );
+      playbackPositionsRef.current.set(matchingRecord.id, offsetSeconds);
+      if (selectedRecord?.id === matchingRecord.id) {
+        handledIncidentRef.current = queryIncidentKey;
+        setSelectedOffsetSeconds(offsetSeconds);
+        setActionMessage("Rekaman indikasi ditemukan pada tanda merah.");
+        setIsTrimmerOpen(true);
+        return;
+      }
+
+      pendingIncidentRef.current = {
+        key: queryIncidentKey,
+        recordId: matchingRecord.id,
+        offsetSeconds,
+      };
+      setSelectedRecordId(matchingRecord.id);
+      setSelectedOffsetSeconds(offsetSeconds);
+      setActionMessage("Rekaman indikasi ditemukan pada tanda merah.");
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    logs,
+    queryCameraId,
+    queryIncidentAt,
+    queryIncidentKey,
+    queryLogId,
+    selectedRecord,
+    visibleRecords,
+  ]);
+
+  useEffect(() => {
+    const pendingIncident = pendingIncidentRef.current;
+    if (!pendingIncident || selectedRecord?.id !== pendingIncident.recordId) return;
+
+    playbackPositionsRef.current.set(
+      pendingIncident.recordId,
+      pendingIncident.offsetSeconds,
+    );
+    setSelectedOffsetSeconds(pendingIncident.offsetSeconds);
+    handledIncidentRef.current = pendingIncident.key;
+    pendingIncidentRef.current = null;
+    setIsTrimmerOpen(true);
+  }, [selectedRecord]);
+
+  const incidentMarkers = useMemo(() => {
+    return buildTimelineMarkers(selectedRecord, logs);
   }, [logs, selectedRecord]);
+
+  const fullscreenIncidentMarkers = useMemo(
+    () => buildTimelineMarkers(fullscreenRecord, logs),
+    [fullscreenRecord, logs],
+  );
 
   const selectedAvailable = selectedRecord?.storageStatus === "available";
   const availableRanges = useMemo(() => {
@@ -258,17 +373,32 @@ export default function RekamanPage() {
     : "-";
 
   const selectedPlaybackId = selectedRecord?.id ?? null;
+  const selectedPlaybackDuration = Math.max(1, selectedRecord?.duration ?? 1);
 
   useEffect(() => {
     const video = playbackVideoRef.current;
     if (!video || !selectedPlaybackId) return;
 
-    setSelectedOffsetSeconds(0);
+    const resumeAt = Math.min(
+      Math.max(0, playbackPositionsRef.current.get(selectedPlaybackId) ?? 0),
+      selectedPlaybackDuration,
+    );
+    setSelectedOffsetSeconds(resumeAt);
     setIsPlaybackPlaying(false);
     setPlaybackError("");
     video.pause();
-    video.currentTime = 0;
-  }, [selectedPlaybackId]);
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      video.currentTime = Math.min(resumeAt, Math.max(0, video.duration));
+    }
+  }, [selectedPlaybackDuration, selectedPlaybackId]);
+
+  useEffect(() => {
+    if (fullscreenRecord || !selectedPlaybackId) return;
+    const video = playbackVideoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    const resumeAt = playbackPositionsRef.current.get(selectedPlaybackId) ?? 0;
+    video.currentTime = Math.min(resumeAt, Math.max(0, video.duration));
+  }, [fullscreenRecord, selectedPlaybackId]);
 
   const handleTimelineTimeChange = (offsetSeconds: number) => {
     if (!selectedRecord) return;
@@ -278,6 +408,7 @@ export default function RekamanPage() {
       selectedDurationSeconds,
     );
     setSelectedOffsetSeconds(boundedOffset);
+    playbackPositionsRef.current.set(selectedRecord.id, boundedOffset);
 
     const video = playbackVideoRef.current;
     if (!video) return;
@@ -304,14 +435,34 @@ export default function RekamanPage() {
     }
   };
 
-  const selectRecord = (record: Recording) => {
+  const selectRecord = (record: Recording, offsetSeconds?: number) => {
+    if (selectedRecord && playbackVideoRef.current) {
+      playbackPositionsRef.current.set(
+        selectedRecord.id,
+        playbackVideoRef.current.currentTime,
+      );
+    }
+    const resumeAt = Math.min(
+      Math.max(
+        0,
+        offsetSeconds ?? playbackPositionsRef.current.get(record.id) ?? 0,
+      ),
+      Math.max(1, record.duration),
+    );
+    playbackPositionsRef.current.set(record.id, resumeAt);
     setSelectedRecordId(record.id);
-    setSelectedOffsetSeconds(0);
+    setSelectedOffsetSeconds(resumeAt);
     setActionMessage("");
   };
 
   const openFullscreenViewer = (record: Recording) => {
-    selectRecord(record);
+    const currentDetailTime = selectedRecord?.id === record.id
+      ? playbackVideoRef.current?.currentTime
+      : undefined;
+    const resumeAt = currentDetailTime
+      ?? playbackPositionsRef.current.get(record.id)
+      ?? 0;
+    selectRecord(record, resumeAt);
     playbackVideoRef.current?.pause();
     setIsPlaybackPlaying(false);
     setPlaybackError("");
@@ -321,7 +472,22 @@ export default function RekamanPage() {
       return;
     }
 
+    setFullscreenStartOffset(resumeAt);
     setFullscreenRecord(record);
+  };
+
+  const handleFullscreenTimeChange = (offsetSeconds: number) => {
+    if (!fullscreenRecord) return;
+    const boundedOffset = Math.min(
+      Math.max(0, offsetSeconds),
+      Math.max(1, fullscreenRecord.duration),
+    );
+    playbackPositionsRef.current.set(fullscreenRecord.id, boundedOffset);
+    setSelectedOffsetSeconds(boundedOffset);
+    const video = fullscreenVideoRef.current;
+    if (video && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      video.currentTime = Math.min(boundedOffset, Math.max(0, video.duration));
+    }
   };
 
   const openTrimmer = (record?: Recording) => {
@@ -615,7 +781,11 @@ export default function RekamanPage() {
                       <VideoOff className="w-7 h-7 text-slate-400" />
                     </div>
                     <h3 className="text-[14px] pwa:text-[15px] font-bold text-[#1e293b] mb-1.5">Tidak ada rekaman</h3>
-                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[300px]">Rekaman akan muncul setelah kamera berhenti atau mencapai batas 24 jam.</p>
+                    <p className="text-[12px] pwa:text-[13px] text-slate-500 font-medium max-w-[320px]">
+                      {queryIncidentKey
+                        ? actionMessage || "Rekaman indikasi sedang diproses setelah kamera berhenti."
+                        : "Rekaman akan muncul setelah kamera berhenti atau mencapai batas 24 jam."}
+                    </p>
                   </div>
                 ) : (                  visibleRecords.map((record) => (
                     <div
@@ -633,6 +803,12 @@ export default function RekamanPage() {
                           label={record.cameraName}
                           unavailable={record.storageStatus === "unavailable"}
                         />
+                        {record.hasIncident && (
+                          <div className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-red-600 px-1.5 py-1 text-[9px] font-bold leading-none text-white shadow-md pwa:right-2 pwa:top-2 pwa:text-[10px]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                            {record.incidentCount} indikasi
+                          </div>
+                        )}
                         <div className="absolute inset-0 flex items-center justify-center">
                           <div className="w-7 h-7 pwa:w-8 pwa:h-8 rounded-full bg-black/60 flex items-center justify-center">
                             {record.storageStatus === "unavailable" ? <AlertTriangle className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 text-white" /> : <Play className="w-3.5 h-3.5 pwa:w-4 pwa:h-4 text-white fill-white ml-0.5" />}
@@ -731,10 +907,19 @@ export default function RekamanPage() {
                           preload="metadata"
                           onPlay={() => setIsPlaybackPlaying(true)}
                           onPause={() => setIsPlaybackPlaying(false)}
-                          onLoadedData={() => setPlaybackError("")}
+                          onLoadedMetadata={(event) => {
+                            const resumeAt = playbackPositionsRef.current.get(selectedRecord.id) ?? 0;
+                            event.currentTarget.currentTime = Math.min(
+                              resumeAt,
+                              Math.max(0, event.currentTarget.duration),
+                            );
+                            setPlaybackError("");
+                          }}
                           onError={() => setPlaybackError("File rekaman belum bisa diputar. Coba Muat Ulang atau pilih segment lain.")}
                           onTimeUpdate={(event) => {
-                            setSelectedOffsetSeconds(event.currentTarget.currentTime);
+                            const currentTime = event.currentTarget.currentTime;
+                            playbackPositionsRef.current.set(selectedRecord.id, currentTime);
+                            setSelectedOffsetSeconds(currentTime);
                           }}
                         />
                       ) : (
@@ -913,6 +1098,12 @@ export default function RekamanPage() {
               <p className="truncate text-xs text-white/70">
                 {formatRecordDate(fullscreenRecord.startTime)} {formatRecordTime(fullscreenRecord.startTime)} · {fullscreenRecord.location}
               </p>
+              {fullscreenIncidentMarkers.length > 0 && (
+                <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-red-600/90 px-2 py-1 text-[10px] font-bold text-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                  {fullscreenIncidentMarkers.length} indikasi
+                </span>
+              )}
             </div>
             <button
               type="button"
@@ -926,22 +1117,57 @@ export default function RekamanPage() {
 
           <video
             key={fullscreenRecord.id}
+            ref={fullscreenVideoRef}
             src={fullscreenRecord.playbackUrl ?? undefined}
-            className="h-full w-full object-contain"
+            className="min-h-0 w-full flex-1 object-contain"
             controls
-            autoPlay
             playsInline
             preload="auto"
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              video.currentTime = Math.min(
+                fullscreenStartOffset,
+                Math.max(0, video.duration),
+              );
+              void video.play().catch(() => undefined);
+            }}
             onTimeUpdate={(event) => {
-              setSelectedOffsetSeconds(event.currentTarget.currentTime);
+              const currentTime = event.currentTarget.currentTime;
+              playbackPositionsRef.current.set(fullscreenRecord.id, currentTime);
+              setSelectedOffsetSeconds(currentTime);
             }}
             onError={() => {
               setPlaybackError("File rekaman belum bisa diputar. Coba Muat Ulang.");
             }}
           />
 
+          <div className="z-10 flex-none border-t border-white/10 bg-slate-950 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6">
+            <div className="mx-auto max-w-5xl">
+              <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-slate-300">
+                <span>Timeline Rekaman</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  Indikasi bullying
+                </span>
+              </div>
+              <TimelineScrubber
+                durationSeconds={Math.max(1, fullscreenRecord.duration)}
+                currentSeconds={selectedOffsetSeconds}
+                startTime={fullscreenRecord.startTime}
+                markers={fullscreenIncidentMarkers}
+                availableRanges={[{
+                  id: fullscreenRecord.id,
+                  startOffsetSeconds: 0,
+                  endOffsetSeconds: Math.max(1, fullscreenRecord.duration),
+                  label: fullscreenRecord.cameraName,
+                }]}
+                onTimeChange={handleFullscreenTimeChange}
+              />
+            </div>
+          </div>
+
           {playbackError && (
-            <div className="pointer-events-none absolute inset-x-4 bottom-20 z-10 mx-auto max-w-lg rounded-xl bg-red-950/90 px-4 py-3 text-center text-sm font-medium text-red-50">
+            <div className="pointer-events-none absolute inset-x-4 bottom-28 z-20 mx-auto max-w-lg rounded-xl bg-red-950/90 px-4 py-3 text-center text-sm font-medium text-red-50">
               {playbackError}
             </div>
           )}
@@ -949,6 +1175,42 @@ export default function RekamanPage() {
       )}
     </div>
   );
+}
+
+function RekamanPageFallback() {
+  return (
+    <div className="-m-4 flex min-h-screen items-center justify-center bg-[#f4f7fb] p-4 text-sm font-semibold text-slate-500 pwa:-m-6 pwa:p-6">
+      Memuat rekaman...
+    </div>
+  );
+}
+
+function buildTimelineMarkers(
+  record: Recording | null,
+  logs: BullyingLog[],
+): TimelineMarker[] {
+  if (!record) return [];
+  const start = new Date(record.startTime).getTime();
+  const end = new Date(record.endTime).getTime();
+
+  return logs
+    .filter((log) => {
+      const timestamp = new Date(log.timestamp).getTime();
+      return (
+        log.cameraId === record.cameraId
+        && timestamp >= start
+        && timestamp <= end
+      );
+    })
+    .map((log) => ({
+      id: log.id,
+      offsetSeconds: Math.max(
+        0,
+        (toDate(log.timestamp).getTime() - start) / 1000,
+      ),
+      label: formatRecordMoment(log.timestamp),
+      description: log.title,
+    }));
 }
 
 function getSevenDayRange(anchor: Date) {

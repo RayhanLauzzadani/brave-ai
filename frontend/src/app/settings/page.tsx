@@ -224,39 +224,37 @@ export default function SettingsPage() {
             </span>
           </div>
 
-          {user?.role === "viewer" && (
-            <button
-              type="button"
-              onClick={() => void toggleSound()}
-              className="mt-4 flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-left transition-colors hover:bg-slate-50"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                  {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[12px] font-black text-slate-900">Suara Notifikasi</span>
-                  <span className="mt-0.5 block text-[10px] font-medium text-slate-500">
-                    Bunyi saat indikasi baru masuk ketika aplikasi terbuka.
-                  </span>
+          <button
+            type="button"
+            onClick={() => void toggleSound()}
+            className="mt-4 flex w-full items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[12px] font-black text-slate-900">Suara Notifikasi</span>
+                <span className="mt-0.5 block text-[10px] font-medium text-slate-500">
+                  Bunyi saat indikasi baru masuk ketika aplikasi terbuka.
                 </span>
               </span>
+            </span>
+            <span
+              className={cn(
+                "relative h-6 w-11 flex-shrink-0 rounded-full transition-colors",
+                soundEnabled ? "bg-blue-600" : "bg-slate-300",
+              )}
+              aria-hidden="true"
+            >
               <span
                 className={cn(
-                  "relative h-6 w-11 flex-shrink-0 rounded-full transition-colors",
-                  soundEnabled ? "bg-blue-600" : "bg-slate-300",
+                  "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                  soundEnabled ? "translate-x-[22px]" : "translate-x-0.5",
                 )}
-                aria-hidden="true"
-              >
-                <span
-                  className={cn(
-                    "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
-                    soundEnabled ? "translate-x-[22px]" : "translate-x-0.5",
-                  )}
-                />
-              </span>
-            </button>
-          )}
+              />
+            </span>
+          </button>
 
           <LogoutButton
             label="Keluar dari Akun"

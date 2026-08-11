@@ -617,7 +617,7 @@ async def create_incident_event(
         ),
         TimelineEvent(
             title="Menunggu validasi",
-            description="Pengawas atau guru perlu memastikan indikasi ini benar-benar bullying",
+            description="Admin sekolah atau Guru BK perlu memastikan indikasi ini benar-benar bullying",
             timestamp=detected_at,
             status="current",
         ),
@@ -662,7 +662,7 @@ async def create_incident_event(
         ),
         timestamp=detected_at,
         is_read=False,
-        audience="viewer",
+        audience="all",
         metadata_json={
             "confidence": payload.confidence,
             "eventId": payload.event_id,

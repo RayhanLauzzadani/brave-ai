@@ -76,8 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const unsubscribe = subscribeAlerts((alert) => {
       addAlert(alert);
       if (
-        user.role !== "viewer"
-        || alert.type !== "bullying_detected"
+        alert.type !== "bullying_detected"
         || !soundEnabled
         || !soundPreferencesHydrated
         || wasAlertSounded(alert.id)
@@ -106,7 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (user?.role !== "viewer" || !soundEnabled) return;
+    if (!user || !soundEnabled) return;
     const unlock = () => {
       void unlockNotificationSound().then((unlocked) => {
         if (unlocked) setSoundBlocked(false);
@@ -114,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
-  }, [soundEnabled, user?.role]);
+  }, [soundEnabled, user]);
 
   const unreadIncidentAlerts = useMemo(
     () =>
@@ -152,7 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <MobileBottomNav />
 
-      {user.role === "viewer" && (firstIncident || soundBlocked) && (
+      {(firstIncident || soundBlocked) && (
         <div className="fixed inset-x-3 bottom-[76px] z-[70] mx-auto flex max-w-md flex-col gap-2 lg:bottom-5 lg:left-auto lg:right-5 lg:mx-0">
           {firstIncident && (
             <button

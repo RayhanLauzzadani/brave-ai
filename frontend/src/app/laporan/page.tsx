@@ -34,7 +34,7 @@ const VIEW_OPTIONS: Array<{
     value: "bullying",
     label: "Bullying",
     emptyTitle: "Belum ada bullying terkonfirmasi",
-    emptyDescription: "Indikasi yang dikonfirmasi Guru BK akan muncul di sini.",
+    emptyDescription: "Indikasi yang dikonfirmasi pihak sekolah akan muncul di sini.",
   },
   {
     value: "pending",
@@ -537,7 +537,7 @@ function getIncidentCopy(verification: IncidentVerification) {
   if (verification === "bullying") {
     return {
       title: "Bullying fisik terkonfirmasi",
-      description: "Guru BK telah mengonfirmasi kejadian ini sebagai bullying.",
+      description: "Pihak sekolah telah mengonfirmasi kejadian ini sebagai bullying.",
     };
   }
   if (verification === "not-bullying") {

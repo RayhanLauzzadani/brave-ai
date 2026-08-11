@@ -8,7 +8,15 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Play, Pause, Scissors, Download, X } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Scissors,
+  Download,
+  Loader2,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface VideoTrimExportPayload {
@@ -35,6 +43,7 @@ interface VideoTrimmerModalProps {
   timelineMarkerLabel?: string;
   liveContext?: boolean;
   canExport?: boolean;
+  maxClipDurationSeconds?: number;
   reviewActions?: React.ReactNode;
 }
 
@@ -46,6 +55,10 @@ interface DragState {
   resumeAfterDrag: boolean;
 }
 
+const DISPLAY_TIME_ZONE = "Asia/Jakarta";
+const DEFAULT_MAX_CLIP_DURATION_SECONDS = 10 * 60;
+const SEEK_TIMEOUT_MS = 15_000;
+
 export function VideoTrimmerModal({
   isOpen,
   onClose,
@@ -55,9 +68,13 @@ export function VideoTrimmerModal({
   timelineMarkerLabel = "Trigger AI",
   liveContext = false,
   canExport = true,
+  maxClipDurationSeconds = DEFAULT_MAX_CLIP_DURATION_SECONDS,
   reviewActions,
 }: VideoTrimmerModalProps) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(Boolean(recordData.playbackUrl));
+  const [playbackError, setPlaybackError] = useState("");
+  const [mediaReloadKey, setMediaReloadKey] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -73,7 +90,9 @@ export function VideoTrimmerModal({
   const [currentTime, setCurrentTime] = useState(initialSession.trimStart);
   const currentTimeRef = useRef(initialSession.trimStart);
   const pendingSeekRef = useRef<number | null>(null);
+  const pendingSeekTimeoutRef = useRef<number | null>(null);
   const resumeAfterSeekRef = useRef(false);
+  const previousBodyOverflowRef = useRef("");
 
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
@@ -85,34 +104,106 @@ export function VideoTrimmerModal({
   const sessionInputRef = useRef({ recordData, eventTime });
   const minimumClipDuration = Math.min(5, totalDuration);
 
+  const clearPendingSeekTimeout = useCallback(() => {
+    if (pendingSeekTimeoutRef.current === null) return;
+    window.clearTimeout(pendingSeekTimeoutRef.current);
+    pendingSeekTimeoutRef.current = null;
+  }, []);
+
+  const schedulePendingSeekTimeout = useCallback((target: number) => {
+    clearPendingSeekTimeout();
+    pendingSeekTimeoutRef.current = window.setTimeout(() => {
+      pendingSeekTimeoutRef.current = null;
+      if (
+        pendingSeekRef.current === null
+        || Math.abs(pendingSeekRef.current - target) > 0.02
+      ) {
+        return;
+      }
+
+      pendingSeekRef.current = null;
+      resumeAfterSeekRef.current = false;
+      previewVideoRef.current?.pause();
+      setIsPlaying(false);
+      setIsBuffering(false);
+      setPlaybackError(
+        "Bagian rekaman belum selesai dimuat. Muat ulang untuk mencoba kembali.",
+      );
+    }, SEEK_TIMEOUT_MS);
+  }, [clearPendingSeekTimeout]);
+
+  const retryPendingSeek = useCallback((video: HTMLVideoElement) => {
+    const target = pendingSeekRef.current;
+    if (target === null || video.readyState < HTMLMediaElement.HAVE_METADATA) {
+      return false;
+    }
+
+    if (!video.seeking && Math.abs(video.currentTime - target) <= 0.02) {
+      pendingSeekRef.current = null;
+      clearPendingSeekTimeout();
+      setIsBuffering(false);
+      return true;
+    }
+
+    setIsBuffering(true);
+    return seekVideo(video, target);
+  }, [clearPendingSeekTimeout]);
+
   const getAbsoluteTimeStr = useCallback((relativeSecs: number) => {
-    const value = new Date(recordData.startTime);
-    value.setSeconds(value.getSeconds() + Math.max(0, relativeSecs));
-    return `${value.getHours().toString().padStart(2, "0")}:${value
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}:${value.getSeconds().toString().padStart(2, "0")}`;
+    const start = new Date(recordData.startTime);
+    if (Number.isNaN(start.getTime())) return "00:00:00";
+    const value = new Date(start.getTime() + Math.max(0, relativeSecs) * 1000);
+    return formatTimeInDisplayZone(value);
   }, [recordData.startTime]);
 
-  function parseAbsoluteToRelative(input: string): number | null {
+  function parseAbsoluteToRelative(
+    input: string,
+    referenceRelative: number,
+  ): number | null {
     const parts = input.split(":").map(Number);
     if (parts.some(Number.isNaN)) return null;
 
-    let totalSecs = 0;
+    let inputClockSeconds = 0;
     if (parts.length === 3) {
-      totalSecs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      inputClockSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
     } else if (parts.length === 2) {
-      totalSecs = parts[0] * 3600 + parts[1] * 60;
+      inputClockSeconds = parts[0] * 3600 + parts[1] * 60;
     } else {
       return null;
     }
 
+    const [hours, minutes, seconds = 0] = parts;
+    if (
+      hours < 0
+      || hours > 23
+      || minutes < 0
+      || minutes > 59
+      || seconds < 0
+      || seconds > 59
+    ) {
+      return null;
+    }
+
     const startDate = new Date(recordData.startTime);
-    const startSeconds = startDate.getHours() * 3600 + startDate.getMinutes() * 60 + startDate.getSeconds();
-    let relative = totalSecs - startSeconds;
-    if (relative < 0) relative += 86400;
-    if (relative < 0 || relative > totalDuration) return null;
-    return relative;
+    if (Number.isNaN(startDate.getTime())) return null;
+    const startClockSeconds = getClockSecondsInDisplayZone(startDate);
+    const baseRelative = inputClockSeconds - startClockSeconds;
+    const maximumDayShift = Math.ceil(totalDuration / 86400) + 1;
+    const candidates: number[] = [];
+
+    for (let dayShift = -1; dayShift <= maximumDayShift; dayShift += 1) {
+      const candidate = baseRelative + dayShift * 86400;
+      if (candidate >= 0 && candidate <= totalDuration) {
+        candidates.push(candidate);
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    return candidates.reduce((closest, candidate) => (
+      Math.abs(candidate - referenceRelative) < Math.abs(closest - referenceRelative)
+        ? candidate
+        : closest
+    ));
   }
 
   useEffect(() => {
@@ -145,15 +236,17 @@ export function VideoTrimmerModal({
     );
     currentTimeRef.current = session.trimStart;
     pendingSeekRef.current = session.trimStart;
+    if (sessionInput.recordData.playbackUrl) {
+      schedulePendingSeekTimeout(session.trimStart);
+    }
     resumeAfterSeekRef.current = false;
     dragStateRef.current = null;
+    previousBodyOverflowRef.current = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     const video = previewVideoRef.current;
     video?.pause();
-    if (video && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      seekVideo(video, session.trimStart);
-    }
+    if (video) retryPendingSeek(video);
 
     const timeout = window.setTimeout(() => {
       setTotalDuration(session.duration);
@@ -164,6 +257,8 @@ export function VideoTrimmerModal({
       setCurrentTime(session.trimStart);
       setActiveHandle(null);
       setIsPlaying(false);
+      setIsBuffering(Boolean(sessionInput.recordData.playbackUrl));
+      setPlaybackError("");
       setIsExporting(false);
       setExportError("");
     }, 0);
@@ -172,33 +267,47 @@ export function VideoTrimmerModal({
       window.clearTimeout(timeout);
       video?.pause();
       pendingSeekRef.current = null;
+      clearPendingSeekTimeout();
       resumeAfterSeekRef.current = false;
       dragStateRef.current = null;
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousBodyOverflowRef.current;
     };
-  }, [isOpen, sourceKey]);
+  }, [
+    clearPendingSeekTimeout,
+    isOpen,
+    retryPendingSeek,
+    schedulePendingSeekTimeout,
+    sourceKey,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || isExporting) return;
+      onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isExporting, isOpen, onClose]);
 
   const setPreviewTime = useCallback((value: number) => {
     const video = previewVideoRef.current;
     const requested = Math.max(0, Math.min(value, totalDuration));
-    const bounded = video && video.readyState >= HTMLMediaElement.HAVE_METADATA
-      ? getBoundedVideoTime(video, requested)
-      : requested;
-    currentTimeRef.current = bounded;
-    setCurrentTime(bounded);
+    currentTimeRef.current = requested;
+    setCurrentTime(requested);
     if (!video) {
       pendingSeekRef.current = null;
+      setIsBuffering(false);
       return;
     }
 
-    pendingSeekRef.current = bounded;
-    if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
-    if (Math.abs(video.currentTime - bounded) <= 0.02) {
-      pendingSeekRef.current = null;
-      return;
-    }
-    seekVideo(video, bounded);
-  }, [totalDuration]);
+    pendingSeekRef.current = requested;
+    schedulePendingSeekTimeout(requested);
+    setPlaybackError("");
+    setIsBuffering(true);
+    retryPendingSeek(video);
+  }, [retryPendingSeek, schedulePendingSeekTimeout, totalDuration]);
 
   const updateHandleValue = useCallback((handle: TrimHandle, value: number) => {
     const roundedValue = Math.round(value * 10) / 10;
@@ -276,21 +385,22 @@ export function VideoTrimmerModal({
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
 
+    dragStateRef.current = null;
+    setActiveHandle(null);
     if (trackRef.current?.hasPointerCapture(event.pointerId)) {
       trackRef.current.releasePointerCapture(event.pointerId);
     }
-    dragStateRef.current = null;
-    setActiveHandle(null);
 
     const video = previewVideoRef.current;
     if (dragState.resumeAfterDrag && currentTimeRef.current < trimEnd - 0.05 && video) {
       if (pendingSeekRef.current !== null || video.seeking) {
         resumeAfterSeekRef.current = true;
+        retryPendingSeek(video);
       } else {
         void video.play().catch(() => setIsPlaying(false));
       }
     }
-  }, [trimEnd]);
+  }, [retryPendingSeek, trimEnd]);
 
   const handlePlaybackToggle = useCallback(async () => {
     const video = previewVideoRef.current;
@@ -311,12 +421,35 @@ export function VideoTrimmerModal({
       resumeAfterSeekRef.current = false;
     }
 
+    if (pendingSeekRef.current !== null || video.seeking) {
+      resumeAfterSeekRef.current = true;
+      retryPendingSeek(video);
+      return;
+    }
+
     try {
       await video.play();
     } catch {
       setIsPlaying(false);
     }
-  }, [recordData.playbackUrl, setPreviewTime, trimEnd, trimStart]);
+  }, [recordData.playbackUrl, retryPendingSeek, setPreviewTime, trimEnd, trimStart]);
+
+  const handleRetryPlayback = useCallback(() => {
+    if (!recordData.playbackUrl) return;
+    const target = Math.max(
+      trimStart,
+      Math.min(currentTimeRef.current, trimEnd),
+    );
+    currentTimeRef.current = target;
+    pendingSeekRef.current = target;
+    schedulePendingSeekTimeout(target);
+    resumeAfterSeekRef.current = false;
+    setCurrentTime(target);
+    setIsPlaying(false);
+    setPlaybackError("");
+    setIsBuffering(true);
+    setMediaReloadKey((current) => current + 1);
+  }, [recordData.playbackUrl, schedulePendingSeekTimeout, trimEnd, trimStart]);
 
   const handleSliderKeyDown = useCallback((
     handle: TrimHandle,
@@ -357,7 +490,7 @@ export function VideoTrimmerModal({
   }, [minimumClipDuration, totalDuration, trimEnd, trimStart, updateHandleValue]);
 
   const handleStartInputCommit = () => {
-    const relative = parseAbsoluteToRelative(startInput);
+    const relative = parseAbsoluteToRelative(startInput, trimStart);
     if (relative !== null && relative <= trimEnd - minimumClipDuration) {
       setTrimStart(relative);
       if (currentTimeRef.current < relative) setPreviewTime(relative);
@@ -367,7 +500,7 @@ export function VideoTrimmerModal({
   };
 
   const handleEndInputCommit = () => {
-    const relative = parseAbsoluteToRelative(endInput);
+    const relative = parseAbsoluteToRelative(endInput, trimEnd);
     if (relative !== null && relative >= trimStart + minimumClipDuration) {
       setTrimEnd(relative);
       if (currentTimeRef.current > relative) setPreviewTime(relative);
@@ -377,8 +510,17 @@ export function VideoTrimmerModal({
   };
 
   const handleExport = async () => {
-    setIsExporting(true);
     setExportError("");
+
+    const selectedDuration = trimEnd - trimStart;
+    if (selectedDuration > maxClipDurationSeconds) {
+      setExportError(
+        `Durasi klip maksimal ${formatClipDuration(maxClipDurationSeconds)}.`,
+      );
+      return;
+    }
+
+    setIsExporting(true);
 
     try {
       await onExport?.({
@@ -451,6 +593,7 @@ export function VideoTrimmerModal({
             <div className="relative w-full max-h-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden border border-slate-800/40 shadow-2xl max-w-4xl mx-auto">
               {recordData.playbackUrl ? (
                 <video
+                  key={`${sourceKey}|${mediaReloadKey}`}
                   ref={previewVideoRef}
                   src={recordData.playbackUrl}
                   aria-label={`Rekaman ${recordData.cameraName}`}
@@ -461,7 +604,25 @@ export function VideoTrimmerModal({
                   muted
                   playsInline
                   preload="metadata"
-                  onLoadedMetadata={() => setPreviewTime(currentTimeRef.current)}
+                  onLoadStart={() => {
+                    setPlaybackError("");
+                    setIsBuffering(true);
+                  }}
+                  onLoadedMetadata={(event) => {
+                    setPlaybackError("");
+                    retryPendingSeek(event.currentTarget);
+                  }}
+                  onDurationChange={(event) => retryPendingSeek(event.currentTarget)}
+                  onProgress={(event) => retryPendingSeek(event.currentTarget)}
+                  onCanPlay={(event) => {
+                    retryPendingSeek(event.currentTarget);
+                    if (pendingSeekRef.current === null && !event.currentTarget.seeking) {
+                      setIsBuffering(false);
+                    }
+                  }}
+                  onSeeking={() => setIsBuffering(true)}
+                  onWaiting={() => setIsBuffering(true)}
+                  onStalled={() => setIsBuffering(true)}
                   onTimeUpdate={(event) => {
                     if (dragStateRef.current) return;
 
@@ -472,6 +633,8 @@ export function VideoTrimmerModal({
                         return;
                       }
                       pendingSeekRef.current = null;
+                      clearPendingSeekTimeout();
+                      setIsBuffering(false);
                     }
                     const nextTime = Math.max(
                       trimStart,
@@ -491,11 +654,13 @@ export function VideoTrimmerModal({
                       pendingSeek !== null
                       && Math.abs(video.currentTime - pendingSeek) > 0.35
                     ) {
-                      seekVideo(video, pendingSeek);
+                      retryPendingSeek(video);
                       return;
                     }
 
                     pendingSeekRef.current = null;
+                    clearPendingSeekTimeout();
+                    setIsBuffering(false);
                     const nextTime = Math.max(
                       trimStart,
                       Math.min(totalDuration, video.currentTime),
@@ -510,10 +675,36 @@ export function VideoTrimmerModal({
                       }
                     }
                   }}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
+                  onPlay={() => {
+                    setIsPlaying(true);
+                    setPlaybackError("");
+                  }}
+                  onPlaying={() => setIsBuffering(false)}
+                  onPause={(event) => {
+                    setIsPlaying(false);
+                    if (
+                      pendingSeekRef.current === null
+                      && !event.currentTarget.seeking
+                    ) {
+                      setIsBuffering(false);
+                    }
+                  }}
+                  onError={() => {
+                    pendingSeekRef.current = null;
+                    clearPendingSeekTimeout();
+                    resumeAfterSeekRef.current = false;
+                    setIsPlaying(false);
+                    setIsBuffering(false);
+                    setPlaybackError(
+                      "Rekaman belum dapat diputar. Arsip mungkin masih diproses atau sudah tidak tersedia.",
+                    );
+                  }}
                   onEnded={(event) => {
                     setIsPlaying(false);
+                    if (pendingSeekRef.current !== null) {
+                      retryPendingSeek(event.currentTarget);
+                      return;
+                    }
                     const boundedEnd = Math.min(trimEnd, event.currentTarget.duration);
                     currentTimeRef.current = boundedEnd;
                     setCurrentTime(boundedEnd);
@@ -526,7 +717,32 @@ export function VideoTrimmerModal({
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20 pointer-events-none" />
 
-              {!isPlaying && recordData.playbackUrl && (
+              {isBuffering && !playbackError && recordData.playbackUrl && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <span className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-xs font-semibold text-white backdrop-blur-md">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Menyiapkan rekaman...
+                  </span>
+                </div>
+              )}
+
+              {playbackError && (
+                <div className="absolute inset-0 flex items-center justify-center p-4">
+                  <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-red-400/20 bg-red-950/90 px-4 py-3 text-center text-xs font-semibold leading-relaxed text-red-100">
+                    <p>{playbackError}</p>
+                    <button
+                      type="button"
+                      onClick={handleRetryPlayback}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-300/20 bg-white/10 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-white/20"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Muat Ulang
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isPlaying && !isBuffering && !playbackError && recordData.playbackUrl && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <button
                     type="button"
@@ -581,6 +797,7 @@ export function VideoTrimmerModal({
               onPointerMove={handlePointerMove}
               onPointerUp={finishPointerInteraction}
               onPointerCancel={finishPointerInteraction}
+              onLostPointerCapture={finishPointerInteraction}
             >
               <div
                 className="absolute top-0 bottom-0 left-0 bg-black/50 rounded-l-xl"
@@ -747,18 +964,26 @@ function getInitialTrimSession(
 }
 
 function seekVideo(video: HTMLVideoElement, seconds: number) {
-  if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
-  const bounded = getBoundedVideoTime(video, seconds);
-  if (Math.abs(video.currentTime - bounded) > 0.02) {
-    video.currentTime = bounded;
-  }
-}
+  if (video.readyState < HTMLMediaElement.HAVE_METADATA) return false;
 
-function getBoundedVideoTime(video: HTMLVideoElement, seconds: number) {
+  const target = Math.max(0, seconds);
   const mediaDuration = Number.isFinite(video.duration)
     ? Math.max(0, video.duration)
-    : Math.max(0, seconds);
-  return Math.max(0, Math.min(seconds, mediaDuration));
+    : null;
+
+  // Progressive MediaMTX playback initially reports only the fragment that
+  // has arrived. Keep the requested seek pending instead of snapping it back
+  // to that temporary duration.
+  if (mediaDuration !== null && target > mediaDuration + 0.05) return false;
+
+  try {
+    if (Math.abs(video.currentTime - target) > 0.02) {
+      video.currentTime = target;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatClipDuration(seconds: number) {
@@ -794,6 +1019,34 @@ function getEventOffset(startTime: string, eventTime: string, duration: number) 
   return Math.max(0, Math.min(duration, offset));
 }
 
+function formatTimeInDisplayZone(value: Date) {
+  const parts = getTimePartsInDisplayZone(value);
+  return `${String(parts.hours).padStart(2, "0")}:${String(parts.minutes).padStart(2, "0")}:${String(parts.seconds).padStart(2, "0")}`;
+}
+
+function getClockSecondsInDisplayZone(value: Date) {
+  const parts = getTimePartsInDisplayZone(value);
+  return parts.hours * 3600 + parts.minutes * 60 + parts.seconds;
+}
+
+function getTimePartsInDisplayZone(value: Date) {
+  const parts = new Intl.DateTimeFormat("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone: DISPLAY_TIME_ZONE,
+  }).formatToParts(value);
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return {
+    hours: Number(values.hour ?? 0),
+    minutes: Number(values.minute ?? 0),
+    seconds: Number(values.second ?? 0),
+  };
+}
+
 function formatEventTimeLabel(value: string) {
   const absolute = new Date(value);
   if (!Number.isNaN(absolute.getTime())) {
@@ -802,7 +1055,7 @@ function formatEventTimeLabel(value: string) {
       minute: "2-digit",
       second: "2-digit",
       hourCycle: "h23",
-      timeZone: "Asia/Jakarta",
+      timeZone: DISPLAY_TIME_ZONE,
     }).format(absolute);
   }
 
