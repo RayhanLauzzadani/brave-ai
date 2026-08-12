@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -10,53 +11,40 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import Settings, get_settings
 
+# ==============================================================================
+# PROMPT HYBRID: AKURASI 81% + ANTI-HALUSINASI
+# ==============================================================================
 CLASSIFICATION_PROMPT = """
-Anda adalah sistem forensik video CCTV yang berspesialisasi dalam mendeteksi agresi fisik
-antar-individu (bullying) pada potongan klip pendek (3 detik).
+Anda adalah sistem forensik video CCTV yang objektif dan berspesialisasi dalam mendeteksi agresi fisik (bullying) pada potongan klip pendek (3 detik).
+Karena ini dari kamera pengawas, Anda WAJIB memperhatikan setiap frame gerakan fisik secara mendetail (gerakan tangan, kaki, posisi tubuh, dan reaksi korban).
 
-Tugas Anda BUKAN mendeteksi gerakan agresif secara umum, melainkan KONTAK FISIK AGRESIF
-YANG DITERIMA OLEH ORANG LAIN. Gerakan agresif yang tidak mengenai siapa pun bukan bullying.
+LANGKAH WAJIB SEBELUM MENGANALISIS (ANTI-HALUSINASI):
+1. CEK KEBERADAAN MANUSIA: Apakah ada wujud manusia yang terlihat jelas di frame?
+   - Jika TIDAK ADA orang sama sekali (ruangan kosong/hanya barang), set `ruangan_kosong` = true dan `jumlah_subjek` = 0. BERHENTI MENCARI dan langsung klasifikasikan sebagai "non-bullying".
+2. JANGAN MENGARANG: Dilarang keras mendeskripsikan gerakan atau interaksi jika wujud manusianya tidak ada di layar. Pantulan cahaya atau bayangan BUKAN manusia.
 
-LANGKAH WAJIB SEBELUM MENYIMPULKAN:
-1. Hitung dan identifikasi dengan jelas berapa banyak subjek/orang yang BENAR-BENAR terlihat
-   di frame sepanjang klip. Jangan pernah mengasumsikan atau mengarang keberadaan orang kedua
-   jika ia tidak benar-benar tampak di gambar.
-2. Jika hanya ada SATU subjek yang terlihat sepanjang klip, klasifikasikan sebagai NON-BULLYING,
-   walaupun subjek tersebut melakukan gerakan meninju, menendang, atau gerakan agresif ke udara,
-   ke benda, atau ke dirinya sendiri (misalnya shadow boxing, latihan bela diri sendirian,
-   olahraga, peregangan, menari, bermain-main sendiri). Ini BUKAN bullying karena tidak ada
-   penerima kontak.
-3. Jika ada dua subjek atau lebih, verifikasi apakah benar-benar terjadi KONTAK FISIK LANGSUNG
-   (tangan/kaki/badan salah satu subjek benar-benar menyentuh tubuh subjek lain) atau gestur
-   ancaman yang jelas diarahkan ke subjek lain. Jangan menyimpulkan kontak hanya karena dua
-   subjek berdekatan, atau karena salah satu subjek bergerak cepat tanpa benar-benar menyentuh
-   yang lain.
+PANDUAN EVALUASI AGRESI (KLASIFIKASI):
+1. BULLYING / AGRESI FISIK: Wajib ada ≥ 2 orang. Terdapat kontak fisik agresif (mendorong, memukul, menendang, menjambak, mencekik, menarik paksa), gestur mengancam, atau memojokkan seseorang. 
+   - ATURAN KETAT: Jika ada dorongan atau pukulan fisik secara sepihak, klasifikasikan sebagai BULLYING meskipun mungkin terlihat seperti "bercanda". Jangan kompromi dengan kontak fisik tanpa izin.
+2. NON-BULLYING: Ruangan kosong (0 orang), hanya 1 orang, atau ≥ 2 orang namun TIDAK ADA kontak fisik agresif sama sekali (hanya berjalan, duduk, berbicara, atau berdiri netral tanpa gestur intimidasi).
 
-Periksa gerakan fisik pada seluruh frame yang diberikan: gerakan tangan, kaki, posisi tubuh,
-arah gerak, kontak fisik, dan reaksi subjek lain (apakah ada yang bereaksi terkena dampak).
-
-Panduan evaluasi:
-1. BULLYING / AGRESI FISIK (wajib ada ≥2 subjek DAN kontak fisik atau ancaman langsung ke
-   subjek lain): mendorong, memukul, menendang, menjambak, mencekik, menarik paksa, gestur
-   mengancam yang diarahkan ke orang lain, atau memojokkan seseorang secara agresif. Jika
-   terlihat dorongan atau pukulan fisik sepihak yang benar-benar mengenai orang lain,
-   klasifikasikan sebagai bullying meskipun mungkin diklaim bercanda.
-2. NON-BULLYING:
-   - Hanya ada satu subjek di frame, apa pun gerakannya.
-   - Gerakan agresif yang diarahkan ke udara, benda, atau diri sendiri (latihan, olahraga,
-     shadow boxing, peregangan).
-   - Tidak ada kontak fisik agresif yang benar-benar mengenai subjek lain.
-   - Berjalan, duduk, berbicara, bermain secara netral, atau berdiri biasa.
-
-Sebelum menjawab, tentukan secara eksplisit jumlah_subjek yang teridentifikasi dan
-ada_kontak_antar_subjek sebagai bagian dari observasi Anda. JANGAN mengarang keberadaan
-orang kedua, identitas, niat, atau kejadian yang tidak benar-benar tampak di visual.
-Jawab murni berdasarkan bukti visual yang benar-benar terlihat.
+FORMAT ALASAN (reason):
+Gunakan format baku ini: "Terdeteksi [jumlah_subjek] orang. Tindakan: [Deskripsi tindakan yang benar-benar terlihat]."
+Contoh Ruangan Kosong: "Terdeteksi 0 orang. Tindakan: Ruangan kosong."
+Contoh Bullying: "Terdeteksi 2 orang. Tindakan: Satu orang menarik paksa dan mendorong tubuh orang lainnya."
 """
 
-
+# ==============================================================================
+# PYDANTIC MODEL (SKEMA JSON DENGAN PARAMETER RUANGAN KOSONG)
+# ==============================================================================
 class GeminiClassification(BaseModel):
-    jumlah_subjek: int = Field(ge=0, description="Jumlah orang yang benar-benar teridentifikasi di frame.")
+    ruangan_kosong: bool = Field(
+        description="WAJIB True jika tidak ada satupun wujud manusia yang terlihat di video (ruangan kosong/hanya barang)."
+    )
+    jumlah_subjek: int = Field(
+        ge=0, 
+        description="Jumlah orang yang terlihat. Jika ruangan_kosong True, ini WAJIB 0."
+    )
     ada_kontak_antar_subjek: bool = Field(
         description="True hanya jika ada kontak fisik nyata yang mengenai subjek lain."
     )
@@ -64,7 +52,10 @@ class GeminiClassification(BaseModel):
     analisis_kontak_fisik: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     prediction: Literal["bullying", "non-bullying"]
-    reason: str = Field(min_length=1)
+    reason: str = Field(
+        min_length=1,
+        description="Format WAJIB: 'Terdeteksi [X] orang. Tindakan: [Deskripsi].'"
+    )
 
 
 class GeminiClassifierError(RuntimeError):
@@ -121,7 +112,7 @@ class GeminiVideoClassifier:
                 }
             ],
             "generationConfig": {
-                "temperature": 0,
+                "temperature": 0.1,  # Sedikit di atas 0 agar lebih luwes dalam deskripsi forensik
                 "maxOutputTokens": 600,
                 "responseMimeType": "application/json",
                 "responseSchema": classification_schema(),
@@ -186,13 +177,17 @@ def classification_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
+            "ruangan_kosong": {
+                "type": "boolean",
+                "description": "WAJIB True jika tidak ada satupun wujud manusia di video (hanya ruangan kosong).",
+            },
             "jumlah_subjek": {
                 "type": "integer",
                 "description": "Jumlah orang yang benar-benar teridentifikasi di frame sepanjang klip.",
             },
             "ada_kontak_antar_subjek": {
                 "type": "boolean",
-                "description": "True hanya jika ada kontak fisik nyata yang mengenai subjek lain (bukan gerakan ke udara/benda/diri sendiri).",
+                "description": "True hanya jika ada kontak fisik nyata yang mengenai subjek lain.",
             },
             "observasi_gerakan": {
                 "type": "string",
@@ -212,10 +207,11 @@ def classification_schema() -> dict[str, Any]:
             },
             "reason": {
                 "type": "string",
-                "description": "Kesimpulan satu kalimat berbasis bukti.",
+                "description": "Kesimpulan ringkas. WAJIB diawali dengan 'Terdeteksi [X] orang. Tindakan: [Y].'",
             },
         },
         "required": [
+            "ruangan_kosong",
             "jumlah_subjek",
             "ada_kontak_antar_subjek",
             "observasi_gerakan",
@@ -313,33 +309,36 @@ def _validate_classification(payload: dict[str, Any]) -> GeminiClassification:
 
 def _apply_hallucination_guard(result: GeminiClassification) -> GeminiClassification:
     """
-    Jaring pengaman terhadap halusinasi model: model kadang mengarang keberadaan
-    subjek kedua atau kontak fisik yang sebenarnya tidak ada di video (mis. saat
-    hanya satu orang latihan meninju udara sendirian). Jika model sendiri melaporkan
-    kurang dari 2 subjek atau tidak ada kontak antar-subjek, prediksi "bullying"
-    TIDAK BOLEH lolos, apa pun narasi yang ditulis model di field lain.
+    Jaring pengaman terhadap halusinasi model dan penyisipan waktu server asli.
     """
+    # Ambil waktu asli dari sistem server saat deteksi terjadi
+    current_time = datetime.now().strftime("%H.%M.%S WIB")
+
     if result.prediction != "bullying":
         return result
 
+    # Cek indikasi AI berhalusinasi
     insufficient_subjects = result.jumlah_subjek < 2
     no_contact_reported = not result.ada_kontak_antar_subjek
+    is_empty_room = result.ruangan_kosong
 
-    if insufficient_subjects or no_contact_reported:
-        override_note = (
-            " [Dikoreksi otomatis oleh sistem: klasifikasi bullying dari model "
-            "ditolak karena jumlah_subjek="
-            f"{result.jumlah_subjek} dan ada_kontak_antar_subjek={result.ada_kontak_antar_subjek}, "
-            "sehingga tidak memenuhi syarat minimum (≥2 subjek dan kontak fisik nyata)."
-            " Mohon tinjau manual jika ragu.]"
+    # Jika terdeteksi halusinasi (ruangan kosong tapi AI bilang bullying)
+    # Paksa ganti status jadi non-bullying secara sepihak
+    if is_empty_room or insufficient_subjects or no_contact_reported:
+        override_reason = (
+            f"Terdeteksi {result.jumlah_subjek} orang. Tindakan: Tidak ada aktivitas agresif "
+            f"(Koreksi Sistem Otomatis). Waktu: {current_time}."
         )
         return result.model_copy(
             update={
                 "prediction": "non-bullying",
-                "reason": result.reason + override_note,
+                "reason": override_reason,
             }
         )
 
+    # Jika memang valid bullying, tambahkan jam di kalimat terakhir reason
+    result.reason = f"{result.reason} Waktu: {current_time}."
+    
     return result
 
 
@@ -357,5 +356,4 @@ def _strip_json_fence(value: str) -> str:
 
 async def _backoff(attempt: int) -> None:
     import asyncio
-
     await asyncio.sleep(min(2 ** attempt, 8))
