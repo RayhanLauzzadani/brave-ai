@@ -61,11 +61,12 @@ class Settings(BaseSettings):
     ai_detection_enabled: bool = False
     ai_detection_clip_seconds: int = 3
     ai_detection_interval_seconds: float = 3.0
-    ai_detection_confidence_threshold: float = 0.75
+    ai_detection_confidence_threshold: float = 0.9
     ai_detection_cooldown_seconds: int = 30
     ai_detection_camera_refresh_seconds: int = 15
-    ai_detection_queue_size: int = 4
-    ai_detection_max_concurrency: int = 1
+    ai_detection_queue_size: int = 2
+    ai_detection_max_concurrency: int = 2
+    ai_detection_max_clip_age_seconds: float = 30.0
     ai_detection_rtsp_base_url: str = "rtsp://mediamtx:8554"
     incident_api_base_url: str = "http://api:8000/api"
     incident_request_timeout_seconds: float = 10.0

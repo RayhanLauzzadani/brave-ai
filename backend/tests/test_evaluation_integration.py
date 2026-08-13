@@ -69,12 +69,15 @@ def test_resume_does_not_reclassify_successful_segment(tmp_path, monkeypatch):
             self.settings = settings
             self.client = client
 
-        async def classify(self, _video_bytes):
+        async def classify(self, _video_bytes, **_kwargs):
             nonlocal calls
             calls += 1
             return GeminiClassification(
-                observasi_gerakan="Ada dorongan.",
-                analisis_kontak_fisik="Kontak fisik terlihat.",
+                ruangan_kosong=False,
+                jumlah_subjek=2,
+                ada_kontak_antar_subjek=True,
+                kronologi_kejadian="Ada dorongan dan reaksi korban.",
+                detik_mulai_kontak=1.0,
                 confidence=0.9,
                 prediction="bullying",
                 reason="Dorongan sepihak.",
@@ -139,7 +142,7 @@ def test_normalization_failure_is_not_counted_as_gemini_request(
             self.settings = settings
             self.client = client
 
-        async def classify(self, _video_bytes):
+        async def classify(self, _video_bytes, **_kwargs):
             raise AssertionError("classifier should not be called")
 
     monkeypatch.setattr(

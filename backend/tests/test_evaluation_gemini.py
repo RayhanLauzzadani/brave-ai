@@ -20,8 +20,11 @@ def _settings(retries: int = 0) -> Settings:
 
 def _response(prediction: str = "bullying") -> httpx.Response:
     result = {
-        "observasi_gerakan": "Satu siswa mendorong siswa lain.",
-        "analisis_kontak_fisik": "Terlihat dorongan sepihak.",
+        "ruangan_kosong": False,
+        "jumlah_subjek": 2,
+        "ada_kontak_antar_subjek": True,
+        "kronologi_kejadian": "Satu siswa mendorong siswa lain.",
+        "detik_mulai_kontak": 1.0,
         "confidence": 0.91,
         "prediction": prediction,
         "reason": "Kontak fisik terlihat.",

@@ -82,7 +82,7 @@ Raspberry Pi -> MediaMTX RTSP -> ai-worker -> Gemini
              -> POST /api/incident-events -> PostgreSQL + WebSocket
 ```
 
-Prediksi `non-bullying` atau confidence di bawah `AI_DETECTION_CONFIDENCE_THRESHOLD` tidak membuat laporan. Prediksi yang lolos tetap berstatus verifikasi `pending` agar guru menentukan bullying atau bukan. Worker memberi setiap event `eventId` stabil, menunggu kapasitas antrean tanpa membuang klip yang sudah ditangkap, dan mencoba ulang pengiriman incident sebelum memulai cooldown. Jumlah percobaan dan jedanya dapat diatur melalui `INCIDENT_REQUEST_MAX_ATTEMPTS` dan `INCIDENT_REQUEST_RETRY_BASE_SECONDS`. Gunakan `docker compose -f docker-compose.backend.yml logs -f ai-worker` untuk melihat status worker. Karena setiap klip memanggil API eksternal, pantau kuota Gemini sebelum mengaktifkannya untuk banyak kamera selama 24 jam.
+Prediksi `non-bullying` atau confidence di bawah `AI_DETECTION_CONFIDENCE_THRESHOLD` tidak membuat laporan. Prediksi yang lolos tetap berstatus verifikasi `pending` agar guru menentukan bullying atau bukan. Worker memberi setiap event `eventId` stabil, menunda capture baru saat antrean penuh, dan melewati klip yang lebih tua dari `AI_DETECTION_MAX_CLIP_AGE_SECONDS` agar notifikasi tidak muncul beberapa menit setelah kejadian. Pengiriman incident tetap dicoba ulang sebelum cooldown dimulai. Jumlah percobaan dan jedanya dapat diatur melalui `INCIDENT_REQUEST_MAX_ATTEMPTS` dan `INCIDENT_REQUEST_RETRY_BASE_SECONDS`. Gunakan `docker compose -f docker-compose.backend.yml logs -f ai-worker` untuk melihat status worker. Karena setiap klip memanggil API eksternal, pantau kuota Gemini sebelum mengaktifkannya untuk banyak kamera selama 24 jam.
 
 ## Evaluasi Dataset Gemini
 

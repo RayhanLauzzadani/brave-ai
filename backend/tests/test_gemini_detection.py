@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,7 +14,10 @@ from app.workers.gemini_detection import (
     _LOCAL_INCIDENT_PENDING,
     CapturedClip,
     _claim_incident_delivery,
+    _classify_and_report,
+    _clip_age_seconds,
     _complete_incident_delivery,
+    _is_clip_stale,
     _post_incident,
     _release_incident_delivery,
     build_capture_command,
@@ -58,8 +62,11 @@ def test_capture_command_reads_camera_from_mediamtx():
 
 def test_only_confident_bullying_creates_incident():
     result = GeminiClassification(
-        observasi_gerakan="Terlihat dorongan.",
-        analisis_kontak_fisik="Kontak sepihak.",
+        ruangan_kosong=False,
+        jumlah_subjek=2,
+        ada_kontak_antar_subjek=True,
+        kronologi_kejadian="Terlihat dorongan sepihak.",
+        detik_mulai_kontak=1.0,
         confidence=0.84,
         prediction="bullying",
         reason="Kontak fisik agresif.",
@@ -92,7 +99,7 @@ def test_incident_event_id_is_stable_for_the_same_clip() -> None:
     clip = CapturedClip(
         camera=_camera(),
         path=Path("/tmp/clip.mp4"),
-        occurred_at=datetime(2026, 8, 2, 8, 30, tzinfo=UTC),
+        started_at=datetime(2026, 8, 2, 8, 30, tzinfo=UTC),
     )
 
     first = build_incident_event_id(clip, b"same-video")
@@ -102,6 +109,104 @@ def test_incident_event_id_is_stable_for_the_same_clip() -> None:
     assert first == second
     assert first != different
     assert first.startswith("gemini-")
+
+
+def test_stale_clip_is_rejected_before_gemini_processing() -> None:
+    clip = CapturedClip(
+        camera=_camera(),
+        path=Path("/tmp/clip.mp4"),
+        started_at=datetime(2026, 8, 2, 8, 30, tzinfo=UTC),
+    )
+    settings = Settings(
+        _env_file=None,
+        ai_detection_max_clip_age_seconds=30,
+    )
+
+    age = _clip_age_seconds(
+        clip,
+        now=datetime(2026, 8, 2, 8, 30, 31, tzinfo=UTC),
+    )
+
+    assert age == 31
+    assert _is_clip_stale(clip, settings, age_seconds=age)
+    assert not _is_clip_stale(clip, settings, age_seconds=30)
+
+    settings.ai_detection_max_clip_age_seconds = 0
+    assert not _is_clip_stale(clip, settings, age_seconds=600)
+
+
+def test_classification_contact_offset_becomes_incident_time(tmp_path) -> None:
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"same-video")
+    clip = CapturedClip(
+        camera=_camera(),
+        path=clip_path,
+        started_at=datetime(2026, 8, 2, 8, 30, tzinfo=UTC),
+    )
+    captured: dict[str, object] = {}
+
+    class FakeClassifier:
+        async def classify(
+            self,
+            video_bytes: bytes,
+            *,
+            clip_duration_seconds: float,
+        ) -> GeminiClassification:
+            captured["video_bytes"] = video_bytes
+            captured["clip_duration_seconds"] = clip_duration_seconds
+            return GeminiClassification(
+                ruangan_kosong=False,
+                jumlah_subjek=2,
+                ada_kontak_antar_subjek=True,
+                kronologi_kejadian="Satu siswa mendorong siswa lainnya.",
+                detik_mulai_kontak=1.25,
+                confidence=0.91,
+                prediction="bullying",
+                reason="Dorongan terlihat jelas.",
+            )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request_body"] = json.loads(request.content)
+        return httpx.Response(201, request=request)
+
+    async def scenario() -> None:
+        settings = Settings(
+            _env_file=None,
+            ai_detection_clip_seconds=3,
+            ai_detection_confidence_threshold=0.75,
+            ai_detection_cooldown_seconds=30,
+            incident_api_base_url="http://api.test/api",
+            incident_request_max_attempts=1,
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            await _classify_and_report(
+                clip,
+                FakeClassifier(),  # type: ignore[arg-type]
+                FakeRedis(),  # type: ignore[arg-type]
+                client,
+                settings,
+            )
+
+    asyncio.run(scenario())
+
+    request_body = captured["request_body"]
+    assert isinstance(request_body, dict)
+    occurred_at = datetime.fromisoformat(str(request_body["occurredAt"]))
+    assert occurred_at == datetime(
+        2026,
+        8,
+        2,
+        8,
+        30,
+        1,
+        250000,
+        tzinfo=UTC,
+    )
+    assert captured["video_bytes"] == b"same-video"
+    assert captured["clip_duration_seconds"] == 3
+    assert "15:30:01 WIB" in str(request_body["description"])
 
 
 def test_incident_post_retries_with_the_same_idempotency_key() -> None:
