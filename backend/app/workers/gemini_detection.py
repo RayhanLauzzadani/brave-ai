@@ -6,7 +6,7 @@ import os
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import quote
@@ -23,6 +23,8 @@ from app.schemas import Camera, IncidentEventCreate
 from app.services.gemini_classifier import (
     GeminiClassification,
     GeminiVideoClassifier,
+    IncidentReport,
+    build_incident_report,
 )
 
 logger = logging.getLogger("brave-ai.gemini-worker")
@@ -32,7 +34,7 @@ logger = logging.getLogger("brave-ai.gemini-worker")
 class CapturedClip:
     camera: Camera
     path: Path
-    occurred_at: datetime
+    started_at: datetime
 
 
 @dataclass(frozen=True)
@@ -139,20 +141,25 @@ async def _produce_camera(
 ) -> None:
     interval = max(1.0, settings.ai_detection_interval_seconds)
     while True:
+        if queue.full():
+            logger.debug(
+                "Queue AI penuh; capture baru kamera %s ditunda agar klip "
+                "tidak menumpuk.",
+                camera.id,
+            )
+            await asyncio.sleep(min(1.0, interval))
+            continue
+
         started = time.monotonic()
         clip_path: Path | None = None
         try:
+            clip_started_at = datetime.now(UTC)
             clip_path = await capture_camera_clip(camera, settings)
-            captured_at = datetime.now(UTC)
-            occurred_at = captured_at - timedelta(
-                seconds=max(1, settings.ai_detection_clip_seconds) / 2
+            item = CapturedClip(
+                camera=camera,
+                path=clip_path,
+                started_at=clip_started_at,
             )
-            item = CapturedClip(camera=camera, path=clip_path, occurred_at=occurred_at)
-            if queue.full():
-                logger.warning(
-                    "Queue AI penuh; kamera %s menunggu kapasitas pemrosesan.",
-                    camera.id,
-                )
             await queue.put(item)
             clip_path = None
         except asyncio.CancelledError:
@@ -270,6 +277,16 @@ async def _consume_clips(
     while True:
         clip = await queue.get()
         try:
+            clip_age = _clip_age_seconds(clip)
+            if _is_clip_stale(clip, settings, age_seconds=clip_age):
+                logger.warning(
+                    "Klip AI kamera %s dilewati karena sudah berusia %.1f "
+                    "detik (batas %.1f detik).",
+                    clip.camera.id,
+                    clip_age,
+                    settings.ai_detection_max_clip_age_seconds,
+                )
+                continue
             await _classify_and_report(
                 clip,
                 classifier,
@@ -286,6 +303,33 @@ async def _consume_clips(
             queue.task_done()
 
 
+def _clip_age_seconds(
+    clip: CapturedClip,
+    *,
+    now: datetime | None = None,
+) -> float:
+    started_at = clip.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=UTC)
+    return max(0.0, (current_time - started_at).total_seconds())
+
+
+def _is_clip_stale(
+    clip: CapturedClip,
+    settings: Settings,
+    *,
+    age_seconds: float | None = None,
+) -> bool:
+    max_age = settings.ai_detection_max_clip_age_seconds
+    if max_age <= 0:
+        return False
+    resolved_age = age_seconds if age_seconds is not None else _clip_age_seconds(clip)
+    return resolved_age > max_age
+
+
 async def _classify_and_report(
     clip: CapturedClip,
     classifier: GeminiVideoClassifier,
@@ -294,14 +338,24 @@ async def _classify_and_report(
     settings: Settings,
 ) -> None:
     video_bytes = await asyncio.to_thread(clip.path.read_bytes)
-    result = await classifier.classify(video_bytes)
+    classification = await classifier.classify(
+        video_bytes,
+        clip_duration_seconds=max(1, settings.ai_detection_clip_seconds),
+    )
+    report = build_incident_report(
+        classification,
+        clip_started_at=clip.started_at,
+    )
     logger.info(
         "Gemini kamera %s: %s (%.2f).",
         clip.camera.name,
-        result.prediction,
-        result.confidence,
+        classification.prediction,
+        classification.confidence,
     )
-    if not should_emit_prediction(result, settings.ai_detection_confidence_threshold):
+    if not should_emit_prediction(
+        classification,
+        settings.ai_detection_confidence_threshold,
+    ):
         return
 
     lease = await _claim_incident_delivery(redis_client, clip.camera.id, settings)
@@ -314,10 +368,10 @@ async def _classify_and_report(
         cameraId=clip.camera.id,
         cameraName=clip.camera.name,
         bullyType="physical",
-        severity=severity_for_confidence(result.confidence),
-        confidence=result.confidence,
-        description=build_incident_description(result),
-        occurredAt=clip.occurred_at,
+        severity=severity_for_confidence(classification.confidence),
+        confidence=classification.confidence,
+        description=build_incident_description(report),
+        occurredAt=report.waktu_kejadian,
         thumbnailUrl=clip.camera.thumbnail_url,
     )
     try:
@@ -330,7 +384,7 @@ async def _classify_and_report(
     logger.info(
         "Incident bullying dikirim untuk %s dengan confidence %.2f.",
         clip.camera.name,
-        result.confidence,
+        classification.confidence,
     )
 
 
@@ -346,11 +400,9 @@ def severity_for_confidence(confidence: float) -> str:
     return "medium"
 
 
-def build_incident_description(result: GeminiClassification) -> str:
+def build_incident_description(report: IncidentReport) -> str:
     return (
-        f"{result.reason} "
-        f"Observasi: {result.observasi_gerakan} "
-        f"Analisis kontak fisik: {result.analisis_kontak_fisik}"
+        f"{report.alasan} Kesimpulan Gemini: {report.raw.reason}"
     )[:4000]
 
 
@@ -358,7 +410,7 @@ def build_incident_event_id(clip: CapturedClip, video_bytes: bytes) -> str:
     digest = sha256()
     digest.update(clip.camera.id.encode("utf-8"))
     digest.update(b":")
-    digest.update(clip.occurred_at.isoformat().encode("ascii"))
+    digest.update(clip.started_at.isoformat().encode("ascii"))
     digest.update(b":")
     digest.update(video_bytes)
     return f"gemini-{digest.hexdigest()[:40]}"

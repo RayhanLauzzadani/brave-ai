@@ -735,7 +735,10 @@ async def evaluate_segment(
                 )
                 video_bytes = await asyncio.to_thread(clip_path.read_bytes)
                 gemini_requested = True
-                classification = await classifier.classify(video_bytes)
+                classification = await classifier.classify(
+                    video_bytes,
+                    clip_duration_seconds=segment.duration_seconds,
+                )
         # A single corrupt clip or provider failure must not abort the benchmark.
         except Exception as error:  # noqa: BLE001
             return EvaluationResult(
@@ -772,8 +775,15 @@ async def evaluate_segment(
             raw_prediction=classification.prediction,
             confidence=classification.confidence,
             reason=classification.reason,
-            observations=classification.observasi_gerakan,
-            contact_analysis=classification.analisis_kontak_fisik,
+            observations=classification.kronologi_kejadian,
+            contact_analysis=(
+                f"Jumlah subjek: {classification.jumlah_subjek}; "
+                f"ruangan kosong: {'ya' if classification.ruangan_kosong else 'tidak'}; "
+                "kontak agresif: "
+                f"{'ya' if classification.ada_kontak_antar_subjek else 'tidak'}; "
+                "detik mulai kontak: "
+                f"{classification.detik_mulai_kontak}"
+            ),
         )
 
 

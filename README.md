@@ -598,7 +598,7 @@ Gemini menerima potongan video pendek dari server. Gemini mengembalikan:
 - Prediksi `bullying` atau `non-bullying`.
 - Alasan singkat.
 
-Sistem membuat indikasi hanya jika hasilnya `bullying` dan nilai keyakinan melewati batas yang ditentukan. Nilai bawaan saat ini adalah `0.75`.
+Sistem membuat indikasi hanya jika hasilnya `bullying`, terlihat sedikitnya dua orang, terdapat kontak fisik agresif yang jelas, dan nilai keyakinan melewati batas yang ditentukan. Nilai bawaan saat ini adalah `0.90`.
 
 ### Mengaktifkan AI lokal
 
@@ -607,7 +607,8 @@ Isi `backend/.env`:
 ```dotenv
 GEMINI_API_KEY=masukkan_api_key_gemini
 AI_DETECTION_ENABLED=true
-AI_DETECTION_CONFIDENCE_THRESHOLD=0.75
+AI_DETECTION_CONFIDENCE_THRESHOLD=0.90
+AI_DETECTION_MAX_CLIP_AGE_SECONDS=30
 INCIDENT_INGEST_TOKEN=brave-local-demo-token
 ```
 
