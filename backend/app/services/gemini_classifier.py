@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import Settings, get_settings
 
-<<<<<<< HEAD
 # ==============================================================================
 # KATEGORI JENIS KONTAK FISIK
 # ==============================================================================
@@ -66,12 +65,6 @@ Anda adalah sistem forensik video CCTV. Anda menerima dan melihat rekaman inside
 aplikasi dan kamera yang terhubung secara live dan realtime, anda bisa juga menganalisis 
 video clip berdurasi 5-15 detik yang dicurigai mengandung anomali gerakan yakni bullying. 
 Tugas Anda adalah memvalidasi apakah ini agresi fisik (bullying) nyata atau aktivitas normal.
-=======
-CLASSIFICATION_PROMPT = """
-Anda adalah sistem forensik video CCTV. Anda menerima potongan rekaman pendek yang dicurigai
-mengandung anomali gerakan. Tugas Anda adalah memvalidasi apakah ini agresi fisik (bullying)
-nyata atau aktivitas normal.
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 
 LANGKAH WAJIB (ANTI-HALUSINASI):
 1. CEK MANUSIA: Jika tidak ada wujud manusia sama sekali, set `ruangan_kosong`=true,
@@ -122,40 +115,23 @@ dan bukan ekspresi wajah pelaku.
     salah satu bentuk kontak AGRESIF di atas.
 
 ANALISIS KRONOLOGI:
-<<<<<<< HEAD
 Karena pada sistem ada klip berdurasi, perhatikan keseluruhan urutan kejadian (Before -> Action -> After):
 - Apakah ada gestur provokasi?
 - Apakah terjadi KONTAK FISIK KASAR secara langsung (menampar, mendorong, memukul, menendang,
   menarik paksa, mencekik/menjambak)?
 - Bagaimana reaksi korban? (Menghindar, terdorong, jatuh, atau justru membalas dengan sikap
   akrab seperti tertawa bersama/merangkul balik).
-=======
-Karena klip ini memiliki durasi, perhatikan keseluruhan urutan kejadian (Before -> Action ->
-After):
-- Apakah ada gestur provokasi?
-- Apakah terjadi KONTAK FISIK KASAR secara langsung (mendorong, memukul, menendang, menarik
-  paksa)?
-- Bagaimana reaksi korban? (Menghindar, terdorong, jatuh).
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 - Perkirakan pada detik keberapa SEJAK AWAL KLIP kontak fisik agresif pertama kali terjadi.
-Catatan: Kontak fisik kasar sepihak, meskipun pelakunya terlihat tertawa/bercanda, WAJIB
-diklasifikasikan sebagai BULLYING.
+*Catatan: Kontak fisik kasar sepihak, meskipun pelakunya terlihat tertawa/bercanda, WAJIB
+diklasifikasikan sebagai BULLYING.*
 
 KRITERIA KLASIFIKASI:
-<<<<<<< HEAD
 - BULLYING: >= 2 orang sungguhan di dalam frame, `jenis_kontak` termasuk kategori AGRESIF,
   kontak tersebut benar-benar mengenai/berdampak pada subjek lain, DAN Anda bisa menunjukkan
   perkiraan detik kejadiannya.
 - NON-BULLYING: Hanya 0-1 orang, ruangan kosong/hanya pantulan, `jenis_kontak` termasuk
   kategori NON-AGRESIF, atau >= 2 orang yang melakukan aktivitas normal/berdekatan tanpa
   kontak agresif (termasuk latihan/olahraga sendirian).
-=======
-- BULLYING: Setidaknya 2 orang sungguhan di dalam frame DAN terdapat bukti nyata kontak fisik
-  agresif antar mereka, DAN Anda bisa menunjukkan perkiraan detik kejadiannya.
-- NON-BULLYING: Hanya 0-1 orang, ruangan kosong/hanya pantulan, atau setidaknya 2 orang yang
-  melakukan aktivitas normal, berdekatan tanpa agresi, atau melakukan gerakan cepat yang tidak
-  mengenai siapa pun (termasuk latihan/olahraga sendirian).
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 
 KALIBRASI CONFIDENCE:
 - Berikan confidence tinggi (>0.7) hanya jika kontak fisik terlihat jelas dan tidak terhalang.
@@ -163,14 +139,11 @@ KALIBRASI CONFIDENCE:
 - Berikan confidence rendah (<0.4) jika buktinya lemah atau meragukan.
 
 Field `reason` cukup berisi kesimpulan analitis singkat (SATU kalimat). Jangan mencantumkan
-jam/waktu di dalam `reason` - waktu kejadian akan dihitung secara terpisah oleh sistem.
+jam/waktu di dalam `reason` — waktu kejadian akan dihitung secara terpisah oleh sistem.
 """
-
-WIB = timezone(timedelta(hours=7), name="WIB")
 
 
 class GeminiClassification(BaseModel):
-<<<<<<< HEAD
     ruangan_kosong: bool = Field(description="True jika frame benar-benar kosong dari manusia sungguhan.")
     jumlah_subjek: int = Field(ge=0, description="Jumlah manusia sungguhan (bukan pantulan) di frame.")
     jenis_kontak: JenisKontak = Field(
@@ -190,44 +163,22 @@ class GeminiClassification(BaseModel):
         )
     )
     kronologi_kejadian: str = Field(min_length=1, description="Penjelasan singkat awal, puncak, dan akhir gerakan di video.")
-=======
-    ruangan_kosong: bool = Field(
-        description="True jika frame benar-benar kosong dari manusia sungguhan."
-    )
-    jumlah_subjek: int = Field(
-        ge=0,
-        description="Jumlah manusia sungguhan (bukan pantulan) di frame.",
-    )
-    ada_kontak_antar_subjek: bool = Field(
-        description="True hanya jika ada kontak fisik agresif nyata antar-subjek."
-    )
-    kronologi_kejadian: str = Field(
-        min_length=1,
-        description="Penjelasan singkat awal, puncak, dan akhir gerakan di video.",
-    )
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
     detik_mulai_kontak: float | None = Field(
         default=None,
         ge=0.0,
-        description=(
-            "Perkiraan detik sejak awal klip saat kontak fisik agresif pertama "
-            "kali terjadi. Null jika non-bullying."
-        ),
+        description="Perkiraan detik sejak awal klip saat kontak fisik agresif pertama kali terjadi. Null jika non-bullying.",
     )
     confidence: float = Field(ge=0.0, le=1.0)
     prediction: Literal["bullying", "non-bullying"]
-    reason: str = Field(
-        min_length=1,
-        description="Kesimpulan analitis singkat tanpa jam atau waktu.",
-    )
+    reason: str = Field(min_length=1, description="Kesimpulan analitis singkat, TANPA jam/waktu.")
 
 
 class GeminiClassifierError(RuntimeError):
-    """Raised when Gemini cannot return a valid classification."""
+    pass
 
 
 class IncidentReport(BaseModel):
-    """Classification enriched with the camera timeline occurrence time."""
+    """Hasil akhir yang siap ditampilkan/dinotifikasikan ke user."""
 
     prediction: Literal["bullying", "non-bullying"]
     jumlah_subjek: int
@@ -252,25 +203,23 @@ class GeminiVideoClassifier:
         self,
         video_bytes: bytes,
         *,
+        clip_started_at: datetime,
         mime_type: str = "video/mp4",
-        clip_duration_seconds: float | None = None,
-    ) -> GeminiClassification:
+    ) -> IncidentReport:
+        """
+        clip_started_at: WAJIB diisi dengan waktu asli mulai rekaman klip (dari metadata
+        kamera/capture pipeline), BUKAN waktu saat fungsi ini dipanggil. Semua perhitungan
+        waktu kejadian didasarkan pada nilai ini + perkiraan detik dari model, supaya
+        keterlambatan proses/antrian/retry tidak menggeser jam kejadian yang dilaporkan.
+        """
         if not self.settings.gemini_api_key:
-            raise GeminiClassifierError(
-                "GEMINI_API_KEY belum dikonfigurasi pada AI worker."
-            )
+            raise GeminiClassifierError("GEMINI_API_KEY belum dikonfigurasi.")
         if not video_bytes:
             raise GeminiClassifierError("Klip video kosong.")
-        if len(video_bytes) > self.settings.gemini_inline_max_bytes:
-            raise GeminiClassifierError(
-                "Klip video terlalu besar untuk dikirim inline ke Gemini."
-            )
 
         model_name = quote(self.settings.gemini_model_name, safe="")
-        url = (
-            self.settings.gemini_api_base_url.rstrip("/")
-            + f"/models/{model_name}:generateContent"
-        )
+        url = f"{self.settings.gemini_api_base_url.rstrip('/')}/models/{model_name}:generateContent"
+
         payload = {
             "contents": [
                 {
@@ -298,30 +247,18 @@ class GeminiVideoClassifier:
         }
 
         owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(
-            timeout=self.settings.gemini_request_timeout_seconds
-        )
+        client = self._client or httpx.AsyncClient(timeout=self.settings.gemini_request_timeout_seconds)
         try:
             response = await self._request_with_retries(client, url, payload)
         finally:
             if owns_client:
                 await client.aclose()
 
-        return _validate_classification(
-            _parse_response_payload(response),
-            max_contact_second=clip_duration_seconds,
-        )
+        result = _validate_classification(_parse_response_payload(response))
+        return _build_incident_report(result, clip_started_at=clip_started_at)
 
-    async def _request_with_retries(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-        payload: dict[str, Any],
-    ) -> httpx.Response:
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self.settings.gemini_api_key,
-        }
+    async def _request_with_retries(self, client: httpx.AsyncClient, url: str, payload: dict[str, Any]) -> httpx.Response:
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.settings.gemini_api_key}
         attempts = max(0, self.settings.gemini_max_retries) + 1
 
         for attempt in range(attempts):
@@ -329,35 +266,23 @@ class GeminiVideoClassifier:
                 response = await client.post(url, headers=headers, json=payload)
             except httpx.RequestError as error:
                 if attempt >= attempts - 1:
-                    raise GeminiClassifierError(
-                        "Gemini tidak dapat dihubungi."
-                    ) from error
+                    raise GeminiClassifierError("Gagal menghubungi Gemini.") from error
                 await _backoff(attempt)
                 continue
 
             if response.status_code == 200:
                 return response
-
             retryable = response.status_code == 429 or response.status_code >= 500
             if not retryable or attempt >= attempts - 1:
-                detail = _gemini_error_detail(
-                    response,
-                    secret=self.settings.gemini_api_key,
-                )
-                suffix = f": {detail}" if detail else "."
-                raise GeminiClassifierError(
-                    f"Gemini mengembalikan HTTP {response.status_code}{suffix}"
-                )
+                raise GeminiClassifierError(f"HTTP {response.status_code}")
             await _backoff(attempt)
-
-        raise GeminiClassifierError("Permintaan ke Gemini gagal setelah retry.")
+        raise GeminiClassifierError("Request gagal setelah retry.")
 
 
 def classification_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-<<<<<<< HEAD
             "ruangan_kosong": {"type": "boolean"},
             "jumlah_subjek": {"type": "integer"},
             "jenis_kontak": {
@@ -370,44 +295,14 @@ def classification_schema() -> dict[str, Any]:
             },
             "ada_kontak_antar_subjek": {"type": "boolean"},
             "kronologi_kejadian": {"type": "string"},
-=======
-            "ruangan_kosong": {
-                "type": "boolean",
-                "description": "True jika tidak ada manusia sungguhan di video.",
-            },
-            "jumlah_subjek": {
-                "type": "integer",
-                "description": "Jumlah manusia sungguhan yang terlihat.",
-            },
-            "ada_kontak_antar_subjek": {
-                "type": "boolean",
-                "description": "True jika ada kontak fisik agresif nyata.",
-            },
-            "kronologi_kejadian": {
-                "type": "string",
-                "description": "Urutan singkat awal, puncak, dan akhir gerakan.",
-            },
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
             "detik_mulai_kontak": {
                 "type": "number",
                 "nullable": True,
-                "description": (
-                    "Detik sejak awal klip saat kontak agresif dimulai, null jika "
-                    "non-bullying."
-                ),
+                "description": "Detik sejak awal klip saat kontak agresif dimulai, null jika non-bullying.",
             },
-            "confidence": {
-                "type": "number",
-                "description": "Keyakinan antara 0.0 dan 1.0.",
-            },
-            "prediction": {
-                "type": "string",
-                "enum": ["bullying", "non-bullying"],
-            },
-            "reason": {
-                "type": "string",
-                "description": "Kesimpulan analitis singkat tanpa jam atau waktu.",
-            },
+            "confidence": {"type": "number"},
+            "prediction": {"type": "string", "enum": ["bullying", "non-bullying"]},
+            "reason": {"type": "string"},
         },
         "required": [
             "ruangan_kosong",
@@ -423,59 +318,19 @@ def classification_schema() -> dict[str, Any]:
     }
 
 
-def _gemini_error_detail(
-    response: httpx.Response,
-    *,
-    secret: str,
-) -> str | None:
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if not isinstance(error, dict):
-        return None
-
-    status = error.get("status")
-    message = error.get("message")
-    parts = [value for value in (status, message) if isinstance(value, str)]
-    detail = ": ".join(parts)
-    if secret:
-        detail = detail.replace(secret, "[REDACTED]")
-    normalized = " ".join(detail.split())
-    return normalized[:500] or None
-
-
 def _parse_response_payload(response: httpx.Response) -> dict[str, Any]:
     try:
         payload = response.json()
-    except (ValueError, json.JSONDecodeError) as error:
-        raise GeminiClassifierError("Respons Gemini bukan JSON yang valid.") from error
-
+    except ValueError:
+        raise GeminiClassifierError("Bukan JSON.")
     candidates = payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        feedback = payload.get("promptFeedback")
-        reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
-        suffix = f" ({reason})" if reason else ""
-        raise GeminiClassifierError(f"Gemini tidak mengembalikan kandidat{suffix}.")
-
-    first = candidates[0]
-    content = first.get("content") if isinstance(first, dict) else None
-    parts = content.get("parts") if isinstance(content, dict) else None
-    text = ""
-    if isinstance(parts, list):
-        text = next(
-            (
-                item.get("text", "")
-                for item in parts
-                if isinstance(item, dict) and isinstance(item.get("text"), str)
-            ),
-            "",
-        )
-
+    if not candidates:
+        raise GeminiClassifierError("Tidak ada kandidat.")
+    text = next(
+        (i.get("text", "") for i in candidates[0].get("content", {}).get("parts", []) if isinstance(i, dict)),
+        "",
+    )
     if not text:
-<<<<<<< HEAD
         raise GeminiClassifierError("Hasil kosong.")
 
     cleaned = text.strip()
@@ -495,52 +350,15 @@ def _validate_classification(payload: dict[str, Any]) -> GeminiClassification:
         norm["jenis_kontak"] = norm["jenis_kontak"].strip().lower().replace(" ", "_").replace("-", "_")
     if isinstance(norm.get("confidence"), (int, float)) and 1 < norm["confidence"] <= 100:
         norm["confidence"] /= 100
-=======
-        raise GeminiClassifierError("Respons Gemini tidak berisi hasil klasifikasi.")
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 
     try:
-        parsed = json.loads(_strip_json_fence(text))
-    except json.JSONDecodeError as error:
-        raise GeminiClassifierError(
-            "Hasil klasifikasi Gemini bukan JSON valid."
-        ) from error
-
-    if not isinstance(parsed, dict):
-        raise GeminiClassifierError(
-            "Hasil klasifikasi Gemini harus berupa object JSON."
-        )
-    return parsed
-
-
-def _validate_classification(
-    payload: dict[str, Any],
-    *,
-    max_contact_second: float | None = None,
-) -> GeminiClassification:
-    normalized = dict(payload)
-    prediction = normalized.get("prediction")
-    if isinstance(prediction, str):
-        normalized["prediction"] = prediction.strip().lower()
-
-    confidence = normalized.get("confidence")
-    if isinstance(confidence, (int, float)) and 1 < confidence <= 100:
-        normalized["confidence"] = confidence / 100
-
-    try:
-        result = GeminiClassification.model_validate(normalized)
+        result = GeminiClassification.model_validate(norm)
     except ValidationError as error:
-        raise GeminiClassifierError(
-            "Format hasil klasifikasi Gemini tidak sesuai schema."
-        ) from error
+        raise GeminiClassifierError("Format hasil klasifikasi tidak sesuai schema.") from error
 
-    return _apply_hallucination_guard(
-        result,
-        max_contact_second=max_contact_second,
-    )
+    return _apply_hallucination_guard(result)
 
 
-<<<<<<< HEAD
 def _apply_hallucination_guard(result: GeminiClassification) -> GeminiClassification:
     """
     Jaring pengaman: prediksi "bullying" hanya boleh lolos jika model SENDIRI melaporkan
@@ -554,95 +372,42 @@ def _apply_hallucination_guard(result: GeminiClassification) -> GeminiClassifica
     """
     if result.prediction != "bullying":
         return result
-=======
-def _apply_hallucination_guard(
-    result: GeminiClassification,
-    *,
-    max_contact_second: float | None = None,
-) -> GeminiClassification:
-    if result.ruangan_kosong:
-        return result.model_copy(
-            update={
-                "jumlah_subjek": 0,
-                "ada_kontak_antar_subjek": False,
-                "detik_mulai_kontak": None,
-                "prediction": "non-bullying",
-            }
-        )
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 
-    contact_outside_clip = (
-        max_contact_second is not None
-        and result.detik_mulai_kontak is not None
-        and result.detik_mulai_kontak > max_contact_second
-    )
-    insufficient_evidence = (
-        result.jumlah_subjek < 2
+    tidak_cukup_bukti = (
+        result.ruangan_kosong
+        or result.jumlah_subjek < 2
         or not result.ada_kontak_antar_subjek
         or result.detik_mulai_kontak is None
-<<<<<<< HEAD
         or result.jenis_kontak not in AGGRESSIVE_CONTACT_TYPES
-=======
-        or contact_outside_clip
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
     )
 
-    if result.prediction == "bullying" and insufficient_evidence:
+    if tidak_cukup_bukti:
         return result.model_copy(
             update={
                 "prediction": "non-bullying",
-                "detik_mulai_kontak": None,
-                "reason": (
-                    result.reason
-                    + " [Auto-koreksi: bukti tidak memenuhi syarat minimum "
-                    "bullying.]"
-                ),
+                "reason": result.reason + " [Auto-koreksi: bukti tidak memenuhi syarat minimum bullying.]",
             }
         )
-
-    if result.prediction == "non-bullying" and result.detik_mulai_kontak is not None:
-        return result.model_copy(update={"detik_mulai_kontak": None})
 
     return result
 
 
-def build_incident_report(
-    result: GeminiClassification,
-    *,
-    clip_started_at: datetime,
-) -> IncidentReport:
-    if clip_started_at.tzinfo is None:
-        clip_started_at = clip_started_at.replace(tzinfo=UTC)
-
+def _build_incident_report(result: GeminiClassification, *, clip_started_at: datetime) -> IncidentReport:
     if result.prediction == "bullying" and result.detik_mulai_kontak is not None:
-        occurrence_time = clip_started_at + timedelta(
-            seconds=result.detik_mulai_kontak
-        )
+        waktu_kejadian = clip_started_at + timedelta(seconds=result.detik_mulai_kontak)
     else:
-        occurrence_time = clip_started_at
-    occurrence_time_wib = occurrence_time.astimezone(WIB)
+        waktu_kejadian = clip_started_at
 
     jenis_kontak_label = result.jenis_kontak.replace("_", " ")
 
     if result.prediction == "bullying":
-<<<<<<< HEAD
         alasan = (
             f"Terdeteksi {result.jumlah_subjek} orang pada {waktu_kejadian:%H:%M:%S} WIB "
             f"(jenis kontak: {jenis_kontak_label}). "
-=======
-        reason = (
-            f"Terdeteksi {result.jumlah_subjek} orang pada "
-            f"{occurrence_time_wib:%H:%M:%S} WIB. "
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
             f"{result.kronologi_kejadian} "
             f"Tingkat keyakinan model: {result.confidence:.0%}."
         )
-    elif result.ruangan_kosong:
-        reason = (
-            f"Tidak ada orang terdeteksi pada {occurrence_time_wib:%H:%M:%S} WIB."
-        )
     else:
-<<<<<<< HEAD
         if result.ruangan_kosong:
             alasan = f"Tidak ada orang terdeteksi pada {waktu_kejadian:%H:%M:%S} WIB."
         else:
@@ -652,40 +417,20 @@ def build_incident_report(
                 f"{result.kronologi_kejadian} "
                 f"Tingkat keyakinan model: {result.confidence:.0%}."
             )
-=======
-        reason = (
-            f"Terdeteksi {result.jumlah_subjek} orang pada "
-            f"{occurrence_time_wib:%H:%M:%S} WIB, tidak ada indikasi kontak "
-            f"fisik agresif. {result.kronologi_kejadian} "
-            f"Tingkat keyakinan model: {result.confidence:.0%}."
-        )
->>>>>>> fe31edead1edea9f83f1089c3b2f3df2a12f74fd
 
     return IncidentReport(
         prediction=result.prediction,
         jumlah_subjek=result.jumlah_subjek,
         jenis_kontak=result.jenis_kontak,
         confidence=result.confidence,
-        waktu_kejadian=occurrence_time,
-        alasan=reason,
+        waktu_kejadian=waktu_kejadian,
+        alasan=alasan,
         kronologi_kejadian=result.kronologi_kejadian,
         raw=result,
     )
 
 
-def _strip_json_fence(value: str) -> str:
-    cleaned = value.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines).strip()
-    return cleaned
-
-
 async def _backoff(attempt: int) -> None:
     import asyncio
 
-    await asyncio.sleep(min(2**attempt, 8))
+    await asyncio.sleep(min(2 ** attempt, 8))
