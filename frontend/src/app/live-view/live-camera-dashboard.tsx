@@ -66,6 +66,7 @@ import {
   getGatewayPlaybackSpans,
   type GatewayPlaybackSpan,
 } from "@/lib/media-gateway";
+import { sortEventsNewestFirst } from "@/lib/event-order";
 import { useAlertStore } from "@/lib/stores/alert-store";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useCameraStore } from "@/lib/stores/camera-store";
@@ -137,7 +138,7 @@ export default function LiveCameraDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const [quality, setQuality] = useState<"HD" | "SD">("HD");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [activatingCameraId, setActivatingCameraId] = useState<string | null>(null);
@@ -610,32 +611,37 @@ export default function LiveCameraDashboard() {
   const connectedCameraCount = cameras.filter(
     (camera) => getEffectiveCameraAvailability(camera.id) === "live",
   ).length;
+  const orderedLogs = useMemo(() => sortEventsNewestFirst(logs), [logs]);
   const unresolvedLogByCameraId = useMemo(() => {
     const result = new Map<string, BullyingLog>();
-    logs.forEach((log) => {
+    orderedLogs.forEach((log) => {
       if (isVerificationPending(log.verificationStatus) && !result.has(log.cameraId)) {
         result.set(log.cameraId, log);
       }
     });
     return result;
-  }, [logs]);
+  }, [orderedLogs]);
 
   const queriedLog = useMemo(
-    () => logs.find((log) => log.id === queryLogId) ?? null,
-    [logs, queryLogId],
+    () => orderedLogs.find((log) => log.id === queryLogId) ?? null,
+    [orderedLogs, queryLogId],
   );
   const visibleLogs = useMemo(() => {
     const cameraLogs = selectedCamera
-      ? logs.filter((log) => log.cameraId === selectedCamera.id)
-      : logs;
-    if (!queriedLog || !cameraLogs.some((log) => log.id === queriedLog.id)) {
-      return cameraLogs.slice(0, 5);
+      ? orderedLogs.filter((log) => log.cameraId === selectedCamera.id)
+      : orderedLogs;
+    const newestLogs = cameraLogs.slice(0, 5);
+
+    if (
+      !queriedLog
+      || !cameraLogs.some((log) => log.id === queriedLog.id)
+      || newestLogs.some((log) => log.id === queriedLog.id)
+    ) {
+      return newestLogs;
     }
-    return [
-      queriedLog,
-      ...cameraLogs.filter((log) => log.id !== queriedLog.id),
-    ].slice(0, 5);
-  }, [logs, queriedLog, selectedCamera]);
+
+    return sortEventsNewestFirst([...newestLogs.slice(0, 4), queriedLog]);
+  }, [orderedLogs, queriedLog, selectedCamera]);
 
   const timelineIncidentMarkers = useMemo<TimelineIncidentMarker[]>(() => {
     if (!selectedCamera || !liveBuffer.available || timelineDurationSeconds <= 0) {
@@ -645,7 +651,7 @@ export default function LiveCameraDashboard() {
     const liveEdgeAt = liveBuffer.liveEdgeAt || now.getTime();
     const markerWindowSeconds = timelineDurationSeconds + 5;
 
-    return logs
+    return orderedLogs
       .filter((log) => log.cameraId === selectedCamera.id)
       .flatMap((log) => {
         const occurredAt = new Date(log.timestamp).getTime();
@@ -672,9 +678,12 @@ export default function LiveCameraDashboard() {
           percent: (positionSeconds / timelineDurationSeconds) * 100,
         }];
       })
-      .sort((left, right) => left.positionSeconds - right.positionSeconds)
+      .sort((left, right) => (
+        left.positionSeconds - right.positionSeconds
+        || left.id.localeCompare(right.id)
+      ))
       .slice(-24);
-  }, [liveBuffer.available, liveBuffer.liveEdgeAt, logs, now, selectedCamera, timelineDurationSeconds]);
+  }, [liveBuffer.available, liveBuffer.liveEdgeAt, now, orderedLogs, selectedCamera, timelineDurationSeconds]);
 
   const openHistoricalIncidentPlayback = useCallback(async (log: BullyingLog) => {
     if (!selectedCamera || selectedCamera.id !== log.cameraId) return;

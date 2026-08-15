@@ -1,4 +1,9 @@
+const INCIDENT_NOTIFICATION_URL = "/audio/incident-notification.wav";
+const INCIDENT_NOTIFICATION_VOLUME = 0.85;
+
 let audioContext: AudioContext | null = null;
+let incidentAudioBufferPromise: Promise<AudioBuffer> | null = null;
+let activeIncidentSource: AudioBufferSourceNode | null = null;
 
 function getAudioContext() {
   if (typeof window === "undefined") return null;
@@ -17,7 +22,10 @@ export async function unlockNotificationSound() {
   if (context.state === "suspended") {
     await context.resume();
   }
-  return context.state === "running";
+  if (context.state !== "running") return false;
+
+  void getIncidentAudioBuffer(context).catch(() => undefined);
+  return true;
 }
 
 export async function playIncidentAlarm() {
@@ -30,30 +38,55 @@ export async function playIncidentAlarm() {
     }
     if (context.state !== "running") return false;
 
-    const start = context.currentTime;
-    playTone(context, 880, start, 0.16);
-    playTone(context, 660, start + 0.21, 0.2);
+    const buffer = await getIncidentAudioBuffer(context);
+    stopActiveIncidentSource();
+
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    gain.gain.value = INCIDENT_NOTIFICATION_VOLUME;
+    source.connect(gain);
+    gain.connect(context.destination);
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+      if (activeIncidentSource === source) activeIncidentSource = null;
+    };
+    activeIncidentSource = source;
+    source.start();
     return true;
   } catch {
     return false;
   }
 }
 
-function playTone(
-  context: AudioContext,
-  frequency: number,
-  startsAt: number,
-  duration: number,
-) {
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(frequency, startsAt);
-  gain.gain.setValueAtTime(0.0001, startsAt);
-  gain.gain.exponentialRampToValueAtTime(0.18, startsAt + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startsAt + duration);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start(startsAt);
-  oscillator.stop(startsAt + duration + 0.02);
+function getIncidentAudioBuffer(context: AudioContext) {
+  if (!incidentAudioBufferPromise) {
+    incidentAudioBufferPromise = fetch(INCIDENT_NOTIFICATION_URL, {
+      cache: "force-cache",
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Audio notifikasi tidak tersedia.");
+        }
+        return response.arrayBuffer();
+      })
+      .then((data) => context.decodeAudioData(data))
+      .catch((error) => {
+        incidentAudioBufferPromise = null;
+        throw error;
+      });
+  }
+
+  return incidentAudioBufferPromise;
+}
+
+function stopActiveIncidentSource() {
+  if (!activeIncidentSource) return;
+  try {
+    activeIncidentSource.stop();
+  } catch {
+    // The previous sound already ended between the check and stop call.
+  }
+  activeIncidentSource = null;
 }

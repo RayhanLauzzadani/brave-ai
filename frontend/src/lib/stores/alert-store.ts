@@ -4,6 +4,7 @@
 
 import { create } from "zustand";
 import { Alert } from "@/lib/types";
+import { sortEventsNewestFirst } from "@/lib/event-order";
 
 interface AlertState {
   alerts: Alert[];
@@ -16,9 +17,7 @@ interface AlertState {
 }
 
 function sortAlerts(alerts: Alert[]) {
-  return [...alerts].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
+  return sortEventsNewestFirst(alerts);
 }
 
 function countUnread(alerts: Alert[]) {

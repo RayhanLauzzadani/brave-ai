@@ -167,7 +167,13 @@ async def list_bullying_logs(
             )
         )
 
-    result = await session.execute(statement.order_by(BullyingLogModel.timestamp.desc()))
+    result = await session.execute(
+        statement.order_by(
+            BullyingLogModel.timestamp.desc(),
+            BullyingLogModel.created_at.desc(),
+            BullyingLogModel.id.desc(),
+        )
+    )
     return [to_bullying_log_schema(log) for log in result.scalars().all()]
 
 
@@ -331,7 +337,13 @@ async def list_alerts(
     if unread_only:
         statement = statement.where(AlertReadReceiptModel.alert_id.is_(None))
 
-    result = await session.execute(statement.order_by(AlertModel.timestamp.desc()))
+    result = await session.execute(
+        statement.order_by(
+            AlertModel.timestamp.desc(),
+            AlertModel.created_at.desc(),
+            AlertModel.id.desc(),
+        )
+    )
     return [
         to_alert_schema(alert, is_read=receipt_alert_id is not None)
         for alert, receipt_alert_id in result.all()
@@ -398,7 +410,11 @@ async def list_incident_reports(
     if status and status != "all":
         statement = statement.where(IncidentReportModel.status == status)
     result = await session.execute(
-        statement.order_by(BullyingLogModel.timestamp.desc())
+        statement.order_by(
+            BullyingLogModel.timestamp.desc(),
+            BullyingLogModel.created_at.desc(),
+            BullyingLogModel.id.desc(),
+        )
     )
     return [
         to_incident_report_schema(report, log)

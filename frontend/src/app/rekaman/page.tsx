@@ -1210,7 +1210,11 @@ function buildTimelineMarkers(
       ),
       label: formatRecordMoment(log.timestamp),
       description: log.title,
-    }));
+    }))
+    .sort((left, right) => (
+      left.offsetSeconds - right.offsetSeconds
+      || left.id.localeCompare(right.id)
+    ));
 }
 
 function getSevenDayRange(anchor: Date) {

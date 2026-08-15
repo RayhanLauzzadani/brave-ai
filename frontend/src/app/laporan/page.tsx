@@ -19,6 +19,7 @@ import {
   getBullyingLogs,
   updateBullyingLogVerification,
 } from "@/lib/api/bullying-logs";
+import { compareEventsNewestFirst } from "@/lib/event-order";
 import type { BullyingLog, IncidentVerification } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -139,10 +140,7 @@ function LaporanContent() {
           log.cameraLocation,
         ].some((value) => value.toLocaleLowerCase("id-ID").includes(term));
       })
-      .sort(
-        (left, right) =>
-          new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-      );
+      .sort(compareEventsNewestFirst);
   }, [logs, search, view]);
 
   const selectedView =

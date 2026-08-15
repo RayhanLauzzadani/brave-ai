@@ -5,6 +5,7 @@
 
 import { BullyingLog, IncidentVerification, LogStatus } from "@/lib/types";
 import { apiClient } from "@/lib/api/client";
+import { sortEventsNewestFirst } from "@/lib/event-order";
 
 /** Get all bullying logs, optionally filtered. */
 export async function getBullyingLogs(filters?: {
@@ -36,7 +37,10 @@ export async function getBullyingLogs(filters?: {
   }
 
   const query = params.toString();
-  return apiClient<BullyingLog[]>(`/bullying-logs${query ? `?${query}` : ""}`);
+  const logs = await apiClient<BullyingLog[]>(
+    `/bullying-logs${query ? `?${query}` : ""}`,
+  );
+  return sortEventsNewestFirst(logs);
 }
 
 /** Get a single bullying log by ID. */

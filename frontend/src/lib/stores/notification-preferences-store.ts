@@ -20,6 +20,14 @@ export const useNotificationPreferencesStore =
       {
         name: "brave-ai-notification-preferences",
         storage: createJSONStorage(() => localStorage),
+        version: 2,
+        migrate: (persistedState, version) => {
+          const persisted = (persistedState ?? {}) as { soundEnabled?: boolean };
+
+          return {
+            soundEnabled: version < 2 ? true : (persisted.soundEnabled ?? true),
+          };
+        },
         partialize: (state) => ({ soundEnabled: state.soundEnabled }),
         onRehydrateStorage: () => (state) => {
           state?.setHasHydrated(true);

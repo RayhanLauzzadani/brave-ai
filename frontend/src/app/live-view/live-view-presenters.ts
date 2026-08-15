@@ -1,4 +1,5 @@
 import type { BullyingLog, Camera, Recording } from "@/lib/types";
+import { sortEventsNewestFirst } from "@/lib/event-order";
 
 export type ActivityItem = {
   id: string;
@@ -113,7 +114,7 @@ export function toActivityItems(logs: BullyingLog[], fallback = FALLBACK_ACTIVIT
     });
   }
 
-  return logs.slice(0, 3).map((log) => {
+  return sortEventsNewestFirst(logs).slice(0, 3).map((log) => {
     const severity = getSeverityStyle(log.severity);
     return {
       id: log.id,
