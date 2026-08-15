@@ -47,6 +47,7 @@ def test_capture_command_reads_camera_from_mediamtx():
         ai_detection_rtsp_base_url="rtsp://mediamtx:8554",
         ai_detection_clip_seconds=3,
         gemini_video_fps=7.5,
+        ai_detection_frame_width=480,
     )
 
     command = build_capture_command(_camera(), settings, Path("/tmp/clip.mp4"))
@@ -55,7 +56,7 @@ def test_capture_command_reads_camera_from_mediamtx():
         "rtsp://mediamtx:8554/camera-test"
     )
     assert command[command.index("-t") + 1] == "3"
-    assert command[command.index("-vf") + 1] == "fps=7.5,scale=640:-2"
+    assert command[command.index("-vf") + 1] == "fps=7.5,scale=480:-2"
     assert command[command.index("-timeout") + 1] == "8000000"
     assert "-rw_timeout" not in command
 
@@ -64,6 +65,7 @@ def test_only_confident_bullying_creates_incident():
     result = GeminiClassification(
         ruangan_kosong=False,
         jumlah_subjek=2,
+        jenis_kontak="dorongan",
         ada_kontak_antar_subjek=True,
         kronologi_kejadian="Terlihat dorongan sepihak.",
         detik_mulai_kontak=1.0,
@@ -157,6 +159,7 @@ def test_classification_contact_offset_becomes_incident_time(tmp_path) -> None:
             return GeminiClassification(
                 ruangan_kosong=False,
                 jumlah_subjek=2,
+                jenis_kontak="dorongan",
                 ada_kontak_antar_subjek=True,
                 kronologi_kejadian="Satu siswa mendorong siswa lainnya.",
                 detik_mulai_kontak=1.25,

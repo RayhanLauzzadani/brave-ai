@@ -117,6 +117,31 @@ def test_realtime_incident_alert_is_sent_to_admin_and_viewer() -> None:
     assert admin_socket.messages[0]["id"] == "alert-test"
 
 
+def test_broken_realtime_connection_does_not_block_other_users() -> None:
+    manager = AlertConnectionManager()
+    broken_socket = FakeWebSocket(fail_on_send=True)
+    healthy_socket = FakeWebSocket()
+
+    async def scenario() -> None:
+        await manager.connect(
+            broken_socket,
+            user_id="viewer-broken",
+            role="viewer",
+        )
+        await manager.connect(
+            healthy_socket,
+            user_id="viewer-healthy",
+            role="viewer",
+        )
+        await manager.broadcast_alert(make_alert(), audience="all")
+
+    asyncio.run(scenario())
+
+    assert len(healthy_socket.messages) == 1
+    assert broken_socket not in manager.active_connections
+    assert healthy_socket in manager.active_connections
+
+
 def make_alert() -> Alert:
     return Alert(
         id="alert-test",
@@ -133,12 +158,15 @@ def make_alert() -> Alert:
 
 
 class FakeWebSocket:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_on_send: bool = False) -> None:
         self.accepted = False
+        self.fail_on_send = fail_on_send
         self.messages: list[dict[str, Any]] = []
 
     async def accept(self) -> None:
         self.accepted = True
 
     async def send_json(self, payload: dict[str, Any]) -> None:
+        if self.fail_on_send:
+            raise OSError("socket closed")
         self.messages.append(payload)

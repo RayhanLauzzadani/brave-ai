@@ -67,27 +67,57 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!hasHydrated || !isAuthenticated || !user) return;
 
     let cancelled = false;
-    void getAlerts()
-      .then((result) => {
-        if (!cancelled) setAlerts(result);
-      })
-      .catch(() => undefined);
+    const knownAlertIds = new Set<string>();
 
-    const unsubscribe = subscribeAlerts((alert) => {
-      addAlert(alert);
-      if (
-        alert.type !== "bullying_detected"
-        || !soundEnabled
-        || !soundPreferencesHydrated
-        || wasAlertSounded(alert.id)
-      ) {
-        return;
-      }
+    const soundNewIncidents = (candidates: Alert[]) => {
+      const incidents = candidates.filter(
+        (alert) =>
+          alert.type === "bullying_detected"
+          && !alert.isRead
+          && soundEnabled
+          && soundPreferencesHydrated
+          && !wasAlertSounded(alert.id),
+      );
+      if (incidents.length === 0) return;
 
-      rememberSoundedAlert(alert.id);
+      incidents.forEach((alert) => rememberSoundedAlert(alert.id));
       void playIncidentAlarm().then((played) => {
         if (!played) setSoundBlocked(true);
       });
+    };
+
+    const syncAlerts = async (soundNew: boolean) => {
+      try {
+        const result = await getAlerts();
+        if (cancelled) return;
+
+        if (soundNew) {
+          soundNewIncidents(
+            result.filter((alert) => !knownAlertIds.has(alert.id)),
+          );
+        }
+        result.forEach((alert) => knownAlertIds.add(alert.id));
+
+        const currentAlerts = useAlertStore.getState().alerts;
+        const serverIds = new Set(result.map((alert) => alert.id));
+        setAlerts([
+          ...result,
+          ...currentAlerts.filter((alert) => !serverIds.has(alert.id)),
+        ]);
+      } catch {
+        // WebSocket tetap berjalan; sinkronisasi berikutnya akan mencoba lagi.
+      }
+    };
+
+    const initialSync = syncAlerts(false);
+
+    const unsubscribe = subscribeAlerts((alert) => {
+      const isNew = !knownAlertIds.has(alert.id);
+      knownAlertIds.add(alert.id);
+      addAlert(alert);
+      if (isNew) soundNewIncidents([alert]);
+    }, undefined, () => {
+      void initialSync.then(() => syncAlerts(true));
     });
 
     return () => {

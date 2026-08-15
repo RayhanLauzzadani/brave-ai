@@ -779,6 +779,7 @@ async def evaluate_segment(
             contact_analysis=(
                 f"Jumlah subjek: {classification.jumlah_subjek}; "
                 f"ruangan kosong: {'ya' if classification.ruangan_kosong else 'tidak'}; "
+                f"jenis kontak: {classification.jenis_kontak}; "
                 "kontak agresif: "
                 f"{'ya' if classification.ada_kontak_antar_subjek else 'tidak'}; "
                 "detik mulai kontak: "

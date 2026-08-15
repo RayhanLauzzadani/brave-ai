@@ -36,7 +36,8 @@ export async function markAllAlertsRead(): Promise<Alert[]> {
 /** Subscribe to real-time alerts from FastAPI WebSocket. */
 export function subscribeAlerts(
   onAlert: (alert: Alert) => void,
-  onError?: (error: Event) => void
+  onError?: (error: Event) => void,
+  onOpen?: () => void,
 ): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
@@ -53,6 +54,7 @@ export function subscribeAlerts(
 
     socket.onopen = () => {
       reconnectAttempt = 0;
+      onOpen?.();
     };
     socket.onmessage = (event) => {
       try {

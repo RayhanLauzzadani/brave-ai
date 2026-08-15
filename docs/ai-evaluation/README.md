@@ -88,7 +88,8 @@ Aturan segmentasi:
 - Video kurang dari 1 detik atau tanpa video dicatat sebagai error.
 
 Video 4 detik menghasilkan satu klip tengah. Video 87 detik menghasilkan 29
-klip. Normalisasi benchmark memakai H.264 tanpa audio pada 10 FPS.
+klip. Normalisasi benchmark memakai H.264 tanpa audio pada 5 FPS secara
+default dan dapat disamakan dengan nilai `GEMINI_VIDEO_FPS` production.
 
 ## Pilot dan Full Run
 

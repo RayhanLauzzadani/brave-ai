@@ -61,8 +61,26 @@ async def run_detection_worker(settings: Settings | None = None) -> None:
         await asyncio.Event().wait()
 
     validate_detection_settings(settings)
+    logger.info(
+        "Worker AI aktif: klip=%ss, fps=%s, lebar=%spx, concurrency=%s, "
+        "queue=%s, threshold=%.2f.",
+        settings.ai_detection_clip_seconds,
+        settings.gemini_video_fps,
+        settings.ai_detection_frame_width,
+        settings.ai_detection_max_concurrency,
+        settings.ai_detection_queue_size,
+        settings.ai_detection_confidence_threshold,
+    )
 
-    classifier = GeminiVideoClassifier(settings=settings)
+    max_concurrency = max(1, settings.ai_detection_max_concurrency)
+    gemini_client = httpx.AsyncClient(
+        timeout=settings.gemini_request_timeout_seconds,
+        limits=httpx.Limits(
+            max_connections=max_concurrency,
+            max_keepalive_connections=max_concurrency,
+        ),
+    )
+    classifier = GeminiVideoClassifier(settings=settings, client=gemini_client)
     queue: asyncio.Queue[CapturedClip] = asyncio.Queue(
         maxsize=max(1, settings.ai_detection_queue_size)
     )
@@ -73,7 +91,7 @@ async def run_detection_worker(settings: Settings | None = None) -> None:
             _consume_clips(queue, classifier, redis_client, event_client, settings),
             name=f"gemini-consumer-{index}",
         )
-        for index in range(max(1, settings.ai_detection_max_concurrency))
+        for index in range(max_concurrency)
     ]
     producers: dict[str, asyncio.Task[None]] = {}
 
@@ -108,6 +126,7 @@ async def run_detection_worker(settings: Settings | None = None) -> None:
             task.cancel()
         await asyncio.gather(*producers.values(), *consumers, return_exceptions=True)
         _discard_pending_queue(queue)
+        await gemini_client.aclose()
         await event_client.aclose()
         await redis_client.aclose()
 
@@ -140,13 +159,19 @@ async def _produce_camera(
     settings: Settings,
 ) -> None:
     interval = max(1.0, settings.ai_detection_interval_seconds)
+    last_queue_warning = 0.0
     while True:
         if queue.full():
-            logger.debug(
-                "Queue AI penuh; capture baru kamera %s ditunda agar klip "
-                "tidak menumpuk.",
-                camera.id,
-            )
+            now = time.monotonic()
+            if now - last_queue_warning >= max(10.0, interval):
+                logger.warning(
+                    "Queue AI penuh (%s/%s); capture kamera %s ditunda. "
+                    "Provider lebih lambat daripada laju video.",
+                    queue.qsize(),
+                    queue.maxsize,
+                    camera.id,
+                )
+                last_queue_warning = now
             await asyncio.sleep(min(1.0, interval))
             continue
 
@@ -249,7 +274,10 @@ def build_capture_command(
         str(max(1, settings.ai_detection_clip_seconds)),
         "-an",
         "-vf",
-        f"fps={settings.gemini_video_fps:g},scale=640:-2",
+        (
+            f"fps={settings.gemini_video_fps:g},"
+            f"scale={max(160, settings.ai_detection_frame_width)}:-2"
+        ),
         "-c:v",
         "libx264",
         "-preset",
@@ -276,6 +304,7 @@ async def _consume_clips(
 ) -> None:
     while True:
         clip = await queue.get()
+        processing_started = time.monotonic()
         try:
             clip_age = _clip_age_seconds(clip)
             if _is_clip_stale(clip, settings, age_seconds=clip_age):
@@ -297,7 +326,13 @@ async def _consume_clips(
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Klip AI kamera %s gagal diproses.", clip.camera.id)
+            logger.exception(
+                "Klip AI kamera %s gagal setelah %.1fs diproses; umur total "
+                "klip %.1fs.",
+                clip.camera.id,
+                time.monotonic() - processing_started,
+                _clip_age_seconds(clip),
+            )
         finally:
             _discard_clip(clip.path)
             queue.task_done()
@@ -337,25 +372,42 @@ async def _classify_and_report(
     event_client: httpx.AsyncClient,
     settings: Settings,
 ) -> None:
+    queue_age = _clip_age_seconds(clip)
+    inference_started = time.monotonic()
     video_bytes = await asyncio.to_thread(clip.path.read_bytes)
     classification = await classifier.classify(
         video_bytes,
         clip_duration_seconds=max(1, settings.ai_detection_clip_seconds),
     )
+    inference_seconds = time.monotonic() - inference_started
+    total_age = _clip_age_seconds(clip)
     report = build_incident_report(
         classification,
         clip_started_at=clip.started_at,
     )
     logger.info(
-        "Gemini kamera %s: %s (%.2f).",
+        "Gemini kamera %s: %s/%s (%.2f), antrean=%.1fs, "
+        "inferensi=%.1fs, total=%.1fs.",
         clip.camera.name,
         classification.prediction,
+        classification.jenis_kontak,
         classification.confidence,
+        queue_age,
+        inference_seconds,
+        total_age,
     )
     if not should_emit_prediction(
         classification,
         settings.ai_detection_confidence_threshold,
     ):
+        if classification.prediction == "bullying":
+            logger.info(
+                "Indikasi kamera %s tidak diterbitkan: confidence %.2f di "
+                "bawah threshold %.2f.",
+                clip.camera.id,
+                classification.confidence,
+                settings.ai_detection_confidence_threshold,
+            )
         return
 
     lease = await _claim_incident_delivery(redis_client, clip.camera.id, settings)
@@ -382,9 +434,11 @@ async def _classify_and_report(
 
     await _complete_incident_delivery(redis_client, lease, settings)
     logger.info(
-        "Incident bullying dikirim untuk %s dengan confidence %.2f.",
+        "Incident bullying dikirim untuk %s dengan confidence %.2f; "
+        "latensi ujung-ke-ujung %.1fs.",
         clip.camera.name,
         classification.confidence,
+        _clip_age_seconds(clip),
     )
 
 
@@ -402,7 +456,8 @@ def severity_for_confidence(confidence: float) -> str:
 
 def build_incident_description(report: IncidentReport) -> str:
     return (
-        f"{report.alasan} Kesimpulan Gemini: {report.raw.reason}"
+        f"{report.alasan} Jenis kontak: {report.jenis_kontak}. "
+        f"Kesimpulan Gemini: {report.raw.reason}"
     )[:4000]
 
 

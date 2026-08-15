@@ -82,7 +82,7 @@ Kamera
 
 Raspberry Pi hanya menjadi penghubung antara kamera dan server. Proses penyimpanan, tampilan video, notifikasi, AI, validasi, serta laporan dilakukan oleh sistem BRAVE AI.
 
-Gemini memeriksa potongan video sekitar 3 detik secara berkala. Fokus sistem saat ini hanya **bullying atau agresi fisik**, misalnya memukul, menendang, mendorong, menjambak, menarik paksa, mencekik, memojokkan, atau gestur fisik agresif lainnya.
+Gemini memeriksa potongan video sekitar 6 detik secara berkala. Fokus sistem saat ini hanya **bullying atau agresi fisik**, misalnya memukul, menendang, mendorong, menjambak, menarik paksa, mencekik, atau kontak fisik agresif lainnya.
 
 ## Panduan Penggunaan Sehari-hari
 
@@ -598,7 +598,7 @@ Gemini menerima potongan video pendek dari server. Gemini mengembalikan:
 - Prediksi `bullying` atau `non-bullying`.
 - Alasan singkat.
 
-Sistem membuat indikasi hanya jika hasilnya `bullying`, terlihat sedikitnya dua orang, terdapat kontak fisik agresif yang jelas, dan nilai keyakinan melewati batas yang ditentukan. Nilai bawaan saat ini adalah `0.90`.
+Sistem membuat indikasi hanya jika hasilnya `bullying`, terlihat sedikitnya dua orang, terdapat kontak fisik agresif yang jelas, dan nilai keyakinan melewati batas yang ditentukan. Nilai bawaan saat ini adalah `0.80` karena hasil tersebut masih harus diperiksa Admin atau Guru BK.
 
 ### Mengaktifkan AI lokal
 
@@ -607,8 +607,8 @@ Isi `backend/.env`:
 ```dotenv
 GEMINI_API_KEY=masukkan_api_key_gemini
 AI_DETECTION_ENABLED=true
-AI_DETECTION_CONFIDENCE_THRESHOLD=0.90
-AI_DETECTION_MAX_CLIP_AGE_SECONDS=30
+AI_DETECTION_CONFIDENCE_THRESHOLD=0.80
+AI_DETECTION_MAX_CLIP_AGE_SECONDS=45
 INCIDENT_INGEST_TOKEN=brave-local-demo-token
 ```
 
@@ -748,7 +748,7 @@ Project dipisahkan menjadi beberapa bagian agar setiap bagian mempunyai tugas ya
 3. **PostgreSQL** menyimpan akun, kamera, indikasi, notifikasi, rekaman, hasil validasi, dan laporan.
 4. **MediaMTX** menerima tayangan Raspberry Pi dan membuat tayangan tersebut dapat dibaca browser.
 5. **Recording worker** mengubah segmen kecil menjadi arsip rekaman maksimal 24 jam.
-6. **AI worker** mengambil potongan 3 detik dan meminta Gemini melakukan klasifikasi.
+6. **AI worker** mengambil potongan 6 detik dan meminta Gemini melakukan klasifikasi.
 7. **Caddy** menyatukan semuanya di bawah domain HTTPS yang sama.
 
 Pemisahan ini membuat bagian kamera, AI, tampilan, dan database dapat diperbaiki tanpa harus membongkar seluruh aplikasi.

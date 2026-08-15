@@ -75,6 +75,7 @@ def test_resume_does_not_reclassify_successful_segment(tmp_path, monkeypatch):
             return GeminiClassification(
                 ruangan_kosong=False,
                 jumlah_subjek=2,
+                jenis_kontak="dorongan",
                 ada_kontak_antar_subjek=True,
                 kronologi_kejadian="Ada dorongan dan reaksi korban.",
                 detik_mulai_kontak=1.0,

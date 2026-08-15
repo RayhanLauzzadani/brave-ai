@@ -2,7 +2,7 @@
 
 FastAPI backend untuk BRAVE AI CCTV monitoring.
 
-Repo ini tidak melatih model AI. Klasifikasi video memakai Gemini melalui `ai-worker` terpusat di server. Worker mengambil klip 3 detik dari MediaMTX, mengirimnya ke Gemini, lalu meneruskan prediksi bullying yang melewati threshold ke endpoint `incident-events`. API menyimpan log dan alert ke PostgreSQL lalu mengirim pembaruan ke frontend melalui WebSocket.
+Repo ini tidak melatih model AI. Klasifikasi video memakai Gemini melalui `ai-worker` terpusat di server. Worker mengambil klip 6 detik dari MediaMTX, mengirimnya ke Gemini, lalu meneruskan prediksi bullying yang melewati threshold ke endpoint `incident-events`. API menyimpan log dan alert ke PostgreSQL lalu mengirim pembaruan ke frontend melalui WebSocket.
 
 Backend menyiapkan kontrak API untuk:
 

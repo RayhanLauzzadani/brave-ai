@@ -1,8 +1,11 @@
+import logging
 from dataclasses import dataclass
 
 from fastapi import WebSocket
 
 from app.schemas import Alert, UserRole
+
+logger = logging.getLogger("brave-ai.alerts")
 
 
 @dataclass(frozen=True)
@@ -42,12 +45,17 @@ class AlertConnectionManager:
         stale_connections: list[WebSocket] = []
         payload = alert.model_dump(mode="json", by_alias=True)
 
-        for connection in self.active_connections.values():
+        for connection in list(self.active_connections.values()):
             if audience != "all" and connection.role != audience:
                 continue
             try:
                 await connection.websocket.send_json(payload)
-            except RuntimeError:
+            except Exception:
+                logger.warning(
+                    "Koneksi alert user %s terputus saat broadcast; koneksi dibersihkan.",
+                    connection.user_id,
+                    exc_info=True,
+                )
                 stale_connections.append(connection.websocket)
 
         for connection in stale_connections:

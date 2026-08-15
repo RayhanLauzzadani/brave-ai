@@ -22,6 +22,7 @@ def _response(prediction: str = "bullying") -> httpx.Response:
     result = {
         "ruangan_kosong": False,
         "jumlah_subjek": 2,
+        "jenis_kontak": "dorongan",
         "ada_kontak_antar_subjek": True,
         "kronologi_kejadian": "Satu siswa mendorong siswa lain.",
         "detik_mulai_kontak": 1.0,
